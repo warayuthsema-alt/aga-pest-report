@@ -94,6 +94,22 @@ const level = (type, pct) => { const c = TYPES[type].crit; return pct > c[2] ? 3
 const critRange = (type, i) => { const c = TYPES[type].crit; return i === 0 ? `0-${c[0]}%` : i === 3 ? `มากกว่า ${c[2]}%` : `${c[i - 1] + 0.1}-${c[i]}%`; };
 
 /* ---------------- calculations ---------------- */
+// one-time migration: "(เก็บผล 9/10/2569)" typed into the location becomes row.set (1st/2nd collection round)
+function normRounds(cfg) {
+  let changed = false;
+  allSections(cfg).forEach(({ sec }) => {
+    const days = [...new Set((sec.rows || []).map(r => (String(r.loc).match(/\(เก็บผล(?:วันที่)?\s*(\d+)\s*\//) || [])[1]).filter(Boolean).map(Number))].sort((a, b) => a - b);
+    (sec.rows || []).forEach(r => {
+      const m = String(r.loc).match(/\s*\(เก็บผล(?:วันที่)?\s*(\d+)\s*\/[^)]*\)/);
+      if (!m || r.set) return;
+      r.set = days.length > 1 ? days.indexOf(Number(m[1])) + 1 : (Number(m[1]) < 15 ? 1 : 2);
+      r.loc = r.loc.replace(m[0], '').trim(); changed = true;
+    });
+  });
+  return changed;
+}
+const roundDates = md => String((md && md.serviceDates) || '').split(/\s*,\s*/).filter(Boolean);
+const roundTag = (rw, md) => rw.set ? `(เก็บผล ${roundDates(md)[rw.set - 1] || 'รอบที่ ' + rw.set})` : '';
 function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sections.forEach(s => out.push({ area: a, sec: s }))); return out; }
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
@@ -201,6 +217,7 @@ function renderTop() {
 }
 async function loadList() {
   S.cfg = siteObj().config;
+  if (S.cfg && S.cfg.areas && normRounds(S.cfg) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
   S.reports = await rpc('pr_list_reports', { k: KEY, p_site: S.siteId });
   if (S.role === 'advance' && !S.links.length) { try { S.links = await rpc('pr_links', { k: KEY }); } catch { } }
 }
@@ -322,7 +339,7 @@ function renderSecEditor() {
       <div class="field"><label>ผู้จัดทำรายงาน</label><input data-meta="preparedBy" value="${esc(md.preparedBy || cfg.preparedBy || '')}"></div>
       <div class="field"><label>ตำแหน่ง</label><input data-meta="preparedRole" value="${esc(md.preparedRole || cfg.preparedRole || '')}"></div>
       <div class="field"><label>ผู้อนุมัติ</label><input data-meta="approver" value="${esc(md.approver || cfg.approver || '')}"></div>
-      <div class="field"><label>วันที่เข้าบริการ (รอบบริการ / รอบติดตามผล)</label><input data-meta="serviceDates" value="${esc(md.serviceDates || '')}" placeholder="เช่น 9/10/2569, 16/10/2569"></div></div>
+      <div class="field"><label>วันที่เก็บผล รอบที่ 1, รอบที่ 2 (คั่นด้วยจุลภาค — ใช้กับจุดที่แยกรอบ)</label><input data-meta="serviceDates" value="${esc(md.serviceDates || '')}" placeholder="เช่น 9/10/2569, 16/10/2569"></div></div>
       <div class="field"><label>สรุปภาพรวมประจำเดือน (แสดงในหน้าสรุปผู้บริหาร)</label><textarea data-meta="overview" spellcheck="true" lang="th" placeholder="เว้นว่างได้ ระบบจะสรุปจากผลแต่ละอุปกรณ์ให้อัตโนมัติ">${esc(md.overview || '')}</textarea></div></div>
       <div class="card"><h3>สถานะการกรอกข้อมูล</h3>${allSections(cfg).map(({ area, sec }) => { const c = calc(cfg, sec, S.data); return `<div class="row small" style="margin:3px 0"><span class="badge ${secDone(sec) ? 'st-approved' : 'st-revise'}">${secDone(sec) ? 'ครบ' : 'ยังไม่ครบ'}</span> ${esc(area.name)} · <b>${esc(sec.title)}</b> — รวม ${c.total} · ${fmt2(c.pct)}% <span class="badge lv${c.lv}">${LV_NAME[c.lv]}</span></div>`; }).join('')}</div>`;
     $$('[data-meta]', m).forEach(i => i.oninput = () => { S.data.meta[i.dataset.meta] = i.value; markDirty(true); });
@@ -342,7 +359,7 @@ function renderSecEditor() {
   let table;
   if (sec.type === 'ilt') {
     table = `<div style="overflow:auto"><table class="inp"><thead><tr><th>No.</th><th>พื้นที่ทำบริการ</th>${INSECTS.map(x => `<th style="min-width:60px">${x}</th>`).join('')}<th>รวม</th><th title="ทำความสะอาด">ทำความ<br>สะอาด</th><th title="ตรวจเช็คหลอดไฟ">เช็ค<br>หลอดไฟ</th><th title="เปลี่ยนแผ่นกาว">เปลี่ยน<br>แผ่นกาว</th></tr></thead><tbody>
-      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${esc(r.loc)}</td>
+      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${esc(r.loc)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td>
         ${INSECTS.map((_, i) => `<td><input type="number" min="0" step="1" data-ilt="${r.id}" data-i="${i}" value="${c[i] ?? ''}" placeholder="-"></td>`).join('')}
         <td class="prev" data-rt="${r.id}"><b>${sum(c)}</b></td>
         ${['clean', 'bulb', 'glue'].map(f => `<td style="text-align:center"><input type="checkbox" data-chk="${r.id}" data-f="${f}" ${x[f] ? 'checked' : ''}></td>`).join('')}
@@ -352,7 +369,7 @@ function renderSecEditor() {
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง</button><button class="btn sm" id="chkAll">✓ ทำความสะอาด/เช็คหลอดไฟ ทุกเครื่อง</button><span class="small muted">ค่าฐานคำนวณ % = ${sec.base || '-'} (แก้ได้ที่ ⚙️ ตั้งค่า)</span></div>`;
   } else {
     table = `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้ง</th><th>เดือนก่อน<br><span class="small">${monthShort(prevKey)}</span></th><th>${monthShort(S.report.month)}<br><span class="small">(${t.unit})</span></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
+      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
       <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
@@ -471,18 +488,20 @@ async function send() {
 
 /* ---------------- settings (advance) ---------------- */
 function renderSettings() {
-  S.view = 'settings'; const cfg = clone(S.cfg); const s = siteObj();
+  S.view = 'settings'; const cfg = clone(S.cfg); const s = siteObj(); const stView = {}, stOpen = new Set();
   const draw = () => {
     app().innerHTML = `<div class="wrap"><div class="actionbar"><button class="btn" id="stBack">← กลับ</button><b>ตั้งค่า: ${esc(s.id === 'pel' ? 'PEL' : s.name)}</b><span style="flex:1"></span><button class="btn pri" id="stSave">💾 บันทึกการตั้งค่า</button></div>
      <div class="card"><h3>ข้อมูลสัญญา</h3><div class="grid3">
        ${[['contract', 'เลขที่สัญญา'], ['name', 'ชื่อลูกค้า'], ['preparedBy', 'ผู้จัดทำ (ค่าเริ่มต้น)'], ['preparedRole', 'ตำแหน่งผู้จัดทำ'], ['approver', 'ผู้อนุมัติ']].map(([k, l]) => `<div class="field"><label>${l}</label><input data-c="${k}" value="${esc(cfg[k] || '')}"></div>`).join('')}</div></div>
      ${cfg.areas.map((a, ai) => `<div class="card"><div class="field"><label>ชื่อพื้นที่</label><input data-an="${ai}" value="${esc(a.name)}"></div>
-       ${a.sections.map((sec, si) => `<details style="border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:8px"><summary><b>${esc(sec.title)}</b> <span class="muted small">(${TYPES[sec.type].name} · ${sec.same ? 'ใช้ข้อมูลร่วม' : sec.rows.length + ' แถว'})</span></summary>
+       ${a.sections.map((sec, si) => `<details data-sid="${sec.id}" ${stOpen.has(sec.id) ? 'open' : ''} style="border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:8px"><summary><b>${esc(sec.title)}</b> <span class="muted small">(${TYPES[sec.type].name} · ${sec.same ? 'ใช้ข้อมูลร่วม' : sec.rows.length + ' แถว'})</span></summary>
          <div class="grid3" style="margin-top:8px"><div class="field"><label>ชื่อหัวข้อ</label><input data-st="${ai}.${si}.title" value="${esc(sec.title)}"></div>
          <div class="field"><label>จำนวนสถานี (ใช้คำนวณ %)</label><input type="number" data-st="${ai}.${si}.stations" value="${sec.stations}"></div>
          ${sec.type === 'ilt' ? `<div class="field"><label>ค่าฐานคำนวณ % (จำนวนแมลงที่ = 100%)</label><input type="number" data-st="${ai}.${si}.base" value="${sec.base || ''}"></div>` : `<div class="field"><label>จำนวนครั้งตรวจเช็ค/เดือน</label><input type="number" data-st="${ai}.${si}.checks" value="${sec.checks}"></div>`}</div>
-         ${sec.same ? '' : `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>สี</th><th></th></tr></thead><tbody>
-           ${sec.rows.map((r, ri) => `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%;color:${(cfg.rowColors || {})[r.id] || '#000'}"></td>
+         ${sec.same ? '' : `<div class="row" style="margin:6px 0">ดูรายชื่อ: ${[[0, 'ทั้งหมด'], [1, 'รอบที่ 1'], [2, 'รอบที่ 2']].map(([v, n]) => `<button class="btn sm ${(stView[sec.id] || 0) === v ? 'pri' : ''}" data-view-set="${sec.id}" data-v="${v}">${n} (${v ? sec.rows.filter(r => !r.set || r.set === v).length : sec.rows.length})</button>`).join('')}<span class="small muted">"ทั้ง 2 รอบ" = จุดที่ตำแหน่งเดิมทั้งสองรอบ</span></div>
+           <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>รอบ</th><th>สี</th><th></th></tr></thead><tbody>
+           ${sec.rows.map((r, ri) => (stView[sec.id] && r.set && r.set !== stView[sec.id]) ? '' : `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%;color:${(cfg.rowColors || {})[r.id] || '#000'}"></td>
+             <td><select data-rs="${ai}.${si}.${ri}">${[['', 'ทั้ง 2 รอบ'], ['1', 'รอบที่ 1'], ['2', 'รอบที่ 2']].map(([v, n]) => `<option value="${v}" ${String(r.set || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
              <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${ROW_COLORS.map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
              <td style="white-space:nowrap"><button class="btn sm" data-rup="${ai}.${si}.${ri}">↑</button> <button class="btn sm danger" data-rdel="${ai}.${si}.${ri}">ลบ</button></td></tr>`).join('')}</tbody></table>
            <button class="btn sm" data-radd="${ai}.${si}" style="margin-top:6px">＋ เพิ่มจุด</button>`}</details>`).join('')}</div>`).join('')}
@@ -500,7 +519,10 @@ function renderSettings() {
     $$('[data-rc]').forEach(i => i.onchange = () => { cfg.rowColors = cfg.rowColors || {}; if (i.value) cfg.rowColors[i.dataset.rc] = i.value; else delete cfg.rowColors[i.dataset.rc]; draw(); });
     $$('[data-rdel]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rdel.split('.'); if (confirm('ลบจุดนี้? (ข้อมูลย้อนหลังของจุดนี้จะไม่แสดง)')) { cfg.areas[a].sections[b].rows.splice(r, 1); draw(); } });
     $$('[data-rup]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rup.split('.').map(Number); const rows = cfg.areas[a].sections[b].rows; if (r > 0) { [rows[r - 1], rows[r]] = [rows[r], rows[r - 1]]; draw(); } });
-    $$('[data-radd]').forEach(x => x.onclick = () => { const [a, b] = x.dataset.radd.split('.'); const sec = cfg.areas[a].sections[b]; sec.rows.push({ id: sec.id + '-n' + Date.now().toString(36), code: '', loc: '' }); draw(); });
+    $$('[data-radd]').forEach(x => x.onclick = () => { const [a, b] = x.dataset.radd.split('.'); const sec = cfg.areas[a].sections[b]; sec.rows.push({ id: sec.id + '-n' + Date.now().toString(36), code: '', loc: '', ...(stView[sec.id] ? { set: stView[sec.id] } : {}) }); draw(); });
+    $$('details[data-sid]').forEach(d => d.ontoggle = () => d.open ? stOpen.add(d.dataset.sid) : stOpen.delete(d.dataset.sid));
+    $$('[data-view-set]').forEach(x => x.onclick = () => { stView[x.dataset.viewSet] = Number(x.dataset.v); draw(); });
+    $$('[data-rs]').forEach(i => i.onchange = () => { const [a, b, r] = i.dataset.rs.split('.'); const row = cfg.areas[a].sections[b].rows[r]; if (i.value) row.set = Number(i.value); else delete row.set; draw(); });
     $$('[data-ly]').forEach(i => i.oninput = i.onchange = () => { const [n, f] = i.dataset.ly.split('.'); cfg.layouts[n][f] = i.value; });
     $$('[data-lydel]').forEach(x => x.onclick = () => { if (confirm('ลบแผนผังนี้?')) { cfg.layouts.splice(+x.dataset.lydel, 1); draw(); } });
     $$('[data-lyimg]').forEach(i => i.onchange = async () => { try { cfg.layouts[+i.dataset.lyimg].src = await uploadImage(i.files[0], `${s.id}/layouts`); draw(); } catch (e) { toast(e.message, true); } });
@@ -617,7 +639,7 @@ function buildReport(el) {
   // ---- page renderers (orientation P = portrait, default landscape) ----
   const S2 = id => findSec(cfg, id), A2 = sec => cfg.areas.find(a => a.sections.includes(sec));
   const lblOf = sec => `${sec.title} — ${A2(sec).name}`;
-  const locHtml = sec => rw => esc(rw.loc).replace(/(\(เก็บผล[^)]*\))/g, '<span class="red">$1</span>');
+  const locHtml = sec => rw => esc(rw.loc) + (rw.set ? ` <span class="red">${esc(roundTag(rw, md))}</span>` : '');
   const rowSt = rw => (cfg.rowColors || {})[rw.id] ? `style="color:${cfg.rowColors[rw.id]}"` : '';   // purple/pink/green per original report
   const countData = sec => {
     const c = calc(cfg, sec, d), rows = secRows(cfg, sec), sv = m => secVals(cfg, sec, year[m] || {});
@@ -640,11 +662,10 @@ function buildReport(el) {
     dev: (ids, set) => {
       // set 1/2 = device list for the 1st/2nd collection date (rows tagged "(เก็บผล <other date>)" are left out)
       const secs = ids.map(S2), area = A2(secs[0]), dates = String(md.serviceDates || '').split(/\s*,\s*/);
-      const keep = rw => !set || !/\(เก็บผล/.test(rw.loc) || new RegExp('เก็บผล(วันที่)?\\s*' + (set === 1 ? '9' : '16') + '\\s*/').test(rw.loc);
-      const rowsOf = sec => sec.rows.filter(keep).map(rw => set ? { ...rw, loc: rw.loc.replace(/\s*\(เก็บผล[^)]*\)/g, '') } : rw);
+      const rowsOf = sec => sec.rows.filter(rw => !set || !rw.set || rw.set === set);
       html += page(pageHead('', set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), codes = rows.map(rw => rw.code);
         return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))} (${esc(codes[0] || '')} - ${esc(codes[codes.length - 1] || '')})</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
-        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('') + (set && dates[set - 1] ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:10px">หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[set - 1])}</div>` : ''),
+        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? esc(rw.loc) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('') + (set && dates[set - 1] ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:10px">หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[set - 1])}</div>` : ''),
         { sec: 'dev_' + ids.join('_') + (set ? '_' + set : ''), label: 'รายการอุปกรณ์ ' + secs.map(x => x.title).join(', '), cls: 'P' });
     },
     layout: i => { const l = (cfg.layouts || [])[i]; if (!l) return; const an = (cfg.areas.find(a => a.id === l.area) || {}).name || '';
