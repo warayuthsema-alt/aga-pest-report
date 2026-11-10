@@ -67,11 +67,12 @@ const CRIT_DESC = [
   'คือ ระดับมาก พบในปริมาณสูง ต้องมีแผนในการสำรวจพื้นที่เพิ่มเติมเพื่อหาแนวทางการแก้ไข มีการเฝ้าระวังและติดตามผลอย่างต่อเนื่องมีการควบคุมอย่างมีขั้นตอน',
   'คือ ระดับระบาด พบปริมาณสูงมาก เข้าสู่ขั้นวิกฤต ต้องสำรวจเชิงลึกร่วมกับผู้เชี่ยวชาญต้องได้รับการกำจัด การแก้ไขและป้องกันอย่างเร่งด่วนเพื่อให้อยู่ในเกณฑ์ที่ควบคุมได้'];
 const LV_NAME = ['ต่ำ', 'กลาง', 'สูง', 'สูงมาก'];
+const ROW_COLORS = [['', 'ดำ'], ['#7030a0', 'ม่วง (ใช้ร่วมกัน)'], ['#d60093', 'ชมพู (ส่วนผลิตอาหารฯ)'], ['#548235', 'เขียว (ส่วนผลิตเครื่องมือแพทย์)'], ['#ff0000', 'แดง'], ['#1f4e9d', 'น้ำเงิน']];
 const REC_AGA = '- สำรวจและตรวจเช็คอุปกรณ์ให้พร้อมใช้งานอยู่ตลอด';
 const REC_CLIENT = '- ไม่ควรหยิบจับหรือเคลื่อนย้ายอุปกรณ์ เครื่องมือ ซึ่งเป็นกับดักแมลงและสัตว์พาหะ ไม่ควรวางอุปกรณ์หรือวัสดุปิดทางกล่องกับดัก';
 const TYPES = {
-  bait: { name: 'กล่องเหยื่อพิษ', report: 'รายงานการวางเหยื่อพิษกำจัดหนู', pest: 'หนู', unit: 'ก้อน', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
-    hitWord: 'พบเหยื่อถูกกัดแทะ', noneWord: 'ไม่พบเหยื่อถูกกัดแทะ', of: 'ของการกัดแทะทั้งหมด', trapWord: 'กล่องเหยื่อ', totalLabel: 'รวมจำนวนเหยื่อที่ถูกกัดแทะ (ก้อน)',
+  bait: { name: 'กล่องเหยื่อพิษ', report: 'รายงานการวางเหยื่อพิษกำจัดหนู', pest: 'หนู', unit: 'จุด', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
+    hitWord: 'พบเหยื่อถูกกัดแทะ', noneWord: 'ไม่พบเหยื่อถูกกัดแทะ', of: 'ของการกัดแทะทั้งหมด', trapWord: 'กล่องเหยื่อ', totalLabel: 'รวมจำนวนจุดที่ถูกกัดแทะ (จุด)',
     chart: 'กราฟแสดงปริมาณการกัดแทะและกินเหยื่อพิษกำจัดหนู (%)', maxPerRow: 2,
     remark: 'จากการตรวจเช็คปริมาณการกัดแทะเหยื่อพิษอยู่ในเกณฑ์ที่ยังสามารถควบคุมได้ ทีม AGA ยังคงเฝ้าระวังอย่างต่อเนื่อง' },
   glue: { name: 'กระดานกาวดักหนู', report: 'รายงานกระดานกาวดักหนู', pest: 'หนู', unit: 'ตัว', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
@@ -351,7 +352,7 @@ function renderSecEditor() {
       ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
-      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · เหยื่อพิษ 1 จุดไม่เกิน 2 ก้อน' : ''}</span></div>`;
+      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · นับเป็นจุดที่ถูกกัดแทะ (1 จุดนับได้สูงสุด ' + sec.checks + ' ครั้ง/เดือน)' : ''}</span></div>`;
   }
   m.innerHTML = `<div class="card"><h2>${esc(sec.title)}</h2><div class="muted small">${esc(t.report)} · ${rows.length} แถว</div>
      <div class="stat" id="liveStat"></div>${table}</div>${textFields(sec)}`;
@@ -368,7 +369,7 @@ function renderSecEditor() {
     if (val === '') return;
     const n = Number(val);
     if (!Number.isInteger(n) || n < 0) { inp.classList.add('bad'); inp.title = 'ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป'; return; }
-    if (sec.type === 'bait' && n > (t.maxPerRow || 2)) { inp.classList.add('warn'); inp.title = 'เกิน 2 ก้อนต่อจุด — ตรวจสอบอีกครั้ง'; }
+    if (sec.type === 'bait' && n > (t.maxPerRow || 2)) { inp.classList.add('warn'); inp.title = 'เกินจำนวนครั้งที่ตรวจเช็คต่อจุด — ตรวจสอบอีกครั้ง'; }
     if (sec.type !== 'ilt' && sec.type !== 'bait' && n > 20) { inp.classList.add('warn'); inp.title = 'ค่าสูงผิดปกติ — ตรวจสอบอีกครั้ง'; }
   };
   $$('[data-v]', m).forEach(i => { validate(i); i.oninput = () => { validate(i); if (i.value === '') delete d.v[i.dataset.v]; else d.v[i.dataset.v] = Number(i.value); markDirty(true); live(); }; });
@@ -477,8 +478,9 @@ function renderSettings() {
          <div class="grid3" style="margin-top:8px"><div class="field"><label>ชื่อหัวข้อ</label><input data-st="${ai}.${si}.title" value="${esc(sec.title)}"></div>
          <div class="field"><label>จำนวนสถานี (ใช้คำนวณ %)</label><input type="number" data-st="${ai}.${si}.stations" value="${sec.stations}"></div>
          ${sec.type === 'ilt' ? `<div class="field"><label>ค่าฐานคำนวณ % (จำนวนแมลงที่ = 100%)</label><input type="number" data-st="${ai}.${si}.base" value="${sec.base || ''}"></div>` : `<div class="field"><label>จำนวนครั้งตรวจเช็ค/เดือน</label><input type="number" data-st="${ai}.${si}.checks" value="${sec.checks}"></div>`}</div>
-         ${sec.same ? '' : `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th></th></tr></thead><tbody>
-           ${sec.rows.map((r, ri) => `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%"></td>
+         ${sec.same ? '' : `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>สี</th><th></th></tr></thead><tbody>
+           ${sec.rows.map((r, ri) => `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%;color:${(cfg.rowColors || {})[r.id] || '#000'}"></td>
+             <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${ROW_COLORS.map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
              <td style="white-space:nowrap"><button class="btn sm" data-rup="${ai}.${si}.${ri}">↑</button> <button class="btn sm danger" data-rdel="${ai}.${si}.${ri}">ลบ</button></td></tr>`).join('')}</tbody></table>
            <button class="btn sm" data-radd="${ai}.${si}" style="margin-top:6px">＋ เพิ่มจุด</button>`}</details>`).join('')}</div>`).join('')}
      <div class="card"><h3>แผนผังจุดติดตั้ง (Layout)</h3><div class="photos">${(cfg.layouts || []).map((l, i) => `<div class="photo-card"><img src="${esc(l.src)}" style="object-fit:contain">
@@ -492,6 +494,7 @@ function renderSettings() {
     $$('[data-an]').forEach(i => i.oninput = () => cfg.areas[+i.dataset.an].name = i.value);
     $$('[data-st]').forEach(i => i.oninput = () => { const [a, b, f] = i.dataset.st.split('.'); cfg.areas[a].sections[b][f] = i.type === 'number' ? Number(i.value) : i.value; });
     $$('[data-rw]').forEach(i => i.oninput = () => { const [a, b, r, f] = i.dataset.rw.split('.'); cfg.areas[a].sections[b].rows[r][f] = i.value; });
+    $$('[data-rc]').forEach(i => i.onchange = () => { cfg.rowColors = cfg.rowColors || {}; if (i.value) cfg.rowColors[i.dataset.rc] = i.value; else delete cfg.rowColors[i.dataset.rc]; draw(); });
     $$('[data-rdel]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rdel.split('.'); if (confirm('ลบจุดนี้? (ข้อมูลย้อนหลังของจุดนี้จะไม่แสดง)')) { cfg.areas[a].sections[b].rows.splice(r, 1); draw(); } });
     $$('[data-rup]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rup.split('.').map(Number); const rows = cfg.areas[a].sections[b].rows; if (r > 0) { [rows[r - 1], rows[r]] = [rows[r], rows[r - 1]]; draw(); } });
     $$('[data-radd]').forEach(x => x.onclick = () => { const [a, b] = x.dataset.radd.split('.'); const sec = cfg.areas[a].sections[b]; sec.rows.push({ id: sec.id + '-n' + Date.now().toString(36), code: '', loc: '' }); draw(); });
@@ -737,7 +740,7 @@ function summaryBlock(secs, d, area) {
 const valuePlugin = {
   id: 'vals', afterDatasetsDraw(chart) {
     const { ctx } = chart; ctx.save(); ctx.font = (chart.options.plugins.vals?.small ? '9px' : '11px') + ' Sarabun'; ctx.fillStyle = '#222'; ctx.textAlign = 'center';
-    chart.data.datasets.forEach((ds, di) => { const meta = chart.getDatasetMeta(di); meta.data.forEach((el, i) => { const v = ds.data[i]; if (v === null || v === undefined) return; const txt = chart.config.type === 'line' && !Number.isInteger(v) ? fmt2(v) : String(v); ctx.fillText(txt, el.x, el.y - 4); }); });
+    chart.data.datasets.forEach((ds, di) => { const meta = chart.getDatasetMeta(di); meta.data.forEach((el, i) => { const v = ds.data[i]; if (v === null || v === undefined) return; const txt = chart.options.plugins.vals?.pct || (chart.config.type === 'line' && !Number.isInteger(v)) ? fmt2(v) : String(v); ctx.fillText(txt, el.x, el.y - 4); }); });
     ctx.restore();
   }
 };
@@ -751,7 +754,7 @@ function drawCharts(list) {
     const ch = new Chart(cv, {
       type: c.type,
       data: { labels: c.labels, datasets: c.sets.map(s => ({ label: s.label, data: s.data, borderColor: s.color, backgroundColor: c.type === 'line' ? s.color : s.color, pointRadius: 3, borderWidth: c.type === 'line' ? 2 : 0, spanGaps: false, maxBarThickness: 26 })) },
-      options: { responsive: false, devicePixelRatio: 2, animation: false, plugins: { legend: { display: !!c.legend, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { enabled: true }, vals: { small: c.small } },
+      options: { responsive: false, devicePixelRatio: 2, animation: false, plugins: { legend: { display: !!c.legend, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { enabled: true }, vals: { small: c.small, pct: c.max === 100 } },
         scales: { y: { beginAtZero: true, max: c.max || undefined, suggestedMax: c.max ? undefined : Math.max(5, Math.ceil(maxV * 1.25)), ticks: { font: { size: c.small ? 8 : 11 } } }, x: { offset: true, ticks: { font: { size: c.small ? 8 : 11 } } } } },
       plugins: [valuePlugin]
     });
