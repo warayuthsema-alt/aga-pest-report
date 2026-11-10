@@ -115,8 +115,8 @@ function calc(cfg, sec, data) {
   const hits = per.filter(p => p.n > 0);
   const stations = Number(sec.stations) || rows.length;
   const hitSt = new Set(hits.map(h => h.row.code)).size;
-  const denom = type === 'bait' ? stations : stations * (Number(sec.checks) || 2);
-  const pct = denom ? (type === 'bait' ? hitSt : total) / denom * 100 : 0;
+  const denom = stations * (Number(sec.checks) || 2);
+  const pct = denom ? total / denom * 100 : 0;
   return { has, per, total, pct, lv: level(type, pct), hits, denom, hitSt, stations };
 }
 function autoSummary(cfg, sec, data) {
@@ -355,7 +355,7 @@ function renderSecEditor() {
       ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
-      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · บันทึกเป็นก้อน · % คิดจากจำนวนสถานีที่ถูกกัดแทะ ÷ ' + sec.stations + ' สถานี' : ''}</span></div>`;
+      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
   }
   m.innerHTML = `<div class="card"><h2>${esc(sec.title)}</h2><div class="muted small">${esc(t.report)} · ${rows.length} แถว</div>
      <div class="stat" id="liveStat"></div>${table}</div>${textFields(sec)}`;
@@ -626,8 +626,8 @@ function buildReport(el) {
     const mt = months.map((m, i) => monthHas[i] ? sum(tdata.map(x => x.vals[i])) : null);
     const mh = months.map((m, i) => monthHas[i] ? new Set(tdata.filter(x => x.vals[i] > 0).map(x => x.rw.code)).size : null);
     const bait = sec.type === 'bait', nHas = monthHas.filter(Boolean).length || 1, grand = sum(mt.filter(v => v !== null));
-    const mp = (bait ? mh : mt).map(v => v === null ? null : v / c.denom * 100);
-    const overall = (bait ? sum(mh.filter(v => v !== null)) : grand) / (c.denom * nHas) * 100;
+    const mp = mt.map(v => v === null ? null : v / c.denom * 100);
+    const overall = grand / (c.denom * nHas) * 100;
     return { c, rows, tdata, mt, mh, mp, nHas, grand, overall, bait };
   };
   const chartBox = (sec, k) => {
@@ -656,7 +656,7 @@ function buildReport(el) {
       const rowHtml = x => `<tr ${rowSt(x.rw)}><td><b>${esc(x.rw.code)}</b></td><td class="l">${locHtml(sec)(x.rw)}</td>${x.vals.map((v, i) => `<td class="${i === ci ? 'cur' : ''}">${v ?? ''}</td>`).join('')}<td>${x.tot}</td></tr>`;
       const foot = `<tr class="tot"><td colspan="2">${esc(t.totalLabel)}</td>${k.mt.map(v => `<td>${v ?? ''}</td>`).join('')}<td>${k.grand}</td></tr>
         ${k.bait ? `<tr class="tot"><td colspan="2">จำนวนสถานีที่ถูกกัดแทะ (จาก ${sec.stations} สถานี)</td>${k.mh.map(v => `<td>${v ?? ''}</td>`).join('')}<td></td></tr>` : ''}
-        <tr class="pct"><td colspan="2">คิดเป็นร้อยละ (${esc(k.bait ? 'ของสถานีที่ถูกกัดแทะ' : t.of)})</td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}<td>${fmt2(k.overall)}</td></tr></tbody></table>`;
+        <tr class="pct"><td colspan="2">คิดเป็นร้อยละ (${esc(t.of)})</td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}<td>${fmt2(k.overall)}</td></tr></tbody></table>`;
       const note = `<div class="rnote"><b>หมายเหตุ :</b> ${esc(autoSummary(cfg, sec, d).split('\n').slice(0, 2).join(' '))}${k.bait ? '' : ` จาก${esc(t.trapWord)}ทั้งหมด ${sec.stations} สถานี (จุด)`}</div>`;
       const PER = 20, chunks = []; for (let i = 0; i < k.tdata.length; i += PER) chunks.push(k.tdata.slice(i, i + PER));
       chunks.forEach((ch, i) => { const last = i === chunks.length - 1;
