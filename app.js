@@ -71,8 +71,8 @@ const ROW_COLORS = [['', 'ดำ'], ['#7030a0', 'ม่วง (ใช้ร่�
 const REC_AGA = '- สำรวจและตรวจเช็คอุปกรณ์ให้พร้อมใช้งานอยู่ตลอด';
 const REC_CLIENT = '- ไม่ควรหยิบจับหรือเคลื่อนย้ายอุปกรณ์ เครื่องมือ ซึ่งเป็นกับดักแมลงและสัตว์พาหะ ไม่ควรวางอุปกรณ์หรือวัสดุปิดทางกล่องกับดัก';
 const TYPES = {
-  bait: { name: 'กล่องเหยื่อพิษ', report: 'รายงานการวางเหยื่อพิษกำจัดหนู', pest: 'หนู', unit: 'จุด', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
-    hitWord: 'พบเหยื่อถูกกัดแทะ', noneWord: 'ไม่พบเหยื่อถูกกัดแทะ', of: 'ของการกัดแทะทั้งหมด', trapWord: 'กล่องเหยื่อ', totalLabel: 'รวมจำนวนจุดที่ถูกกัดแทะ (จุด)',
+  bait: { name: 'กล่องเหยื่อพิษ', report: 'รายงานการวางเหยื่อพิษกำจัดหนู', pest: 'หนู', unit: 'ก้อน', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
+    hitWord: 'พบเหยื่อถูกกัดแทะ', noneWord: 'ไม่พบเหยื่อถูกกัดแทะ', of: 'ของการกัดแทะทั้งหมด', trapWord: 'กล่องเหยื่อ', totalLabel: 'รวมจำนวนเหยื่อที่ถูกกัดแทะ (ก้อน)',
     chart: 'กราฟแสดงปริมาณการกัดแทะและกินเหยื่อพิษกำจัดหนู (%)', maxPerRow: 2,
     remark: 'จากการตรวจเช็คปริมาณการกัดแทะเหยื่อพิษอยู่ในเกณฑ์ที่ยังสามารถควบคุมได้ ทีม AGA ยังคงเฝ้าระวังอย่างต่อเนื่อง' },
   glue: { name: 'กระดานกาวดักหนู', report: 'รายงานกระดานกาวดักหนู', pest: 'หนู', unit: 'ตัว', crit: [45, 70, 90], critName: 'การกัดแทะเหยื่อพิษ การติดกับดักกาว',
@@ -112,10 +112,12 @@ function calc(cfg, sec, data) {
   }
   const per = rows.map(r => ({ row: r, n: Number(v[r.id]) || 0, filled: v[r.id] !== undefined && v[r.id] !== null && v[r.id] !== '' }));
   const total = sum(per.map(p => p.n));
-  const denom = (Number(sec.stations) || rows.length) * (Number(sec.checks) || 2);
-  const pct = denom ? total / denom * 100 : 0;
   const hits = per.filter(p => p.n > 0);
-  return { has, per, total, pct, lv: level(type, pct), hits, denom };
+  const stations = Number(sec.stations) || rows.length;
+  const hitSt = new Set(hits.map(h => h.row.code)).size;
+  const denom = type === 'bait' ? stations : stations * (Number(sec.checks) || 2);
+  const pct = denom ? (type === 'bait' ? hitSt : total) / denom * 100 : 0;
+  return { has, per, total, pct, lv: level(type, pct), hits, denom, hitSt, stations };
 }
 function autoSummary(cfg, sec, data) {
   const t = TYPES[sec.type], c = calc(cfg, sec, data), st = Number(sec.stations) || secRows(cfg, sec).length;
@@ -129,6 +131,7 @@ function autoSummary(cfg, sec, data) {
   const first = c.total > 0
     ? `${t.hitWord} จำนวน ${c.total} ${t.unit}${c.hits.length ? ` ที่จุด ${c.hits.map(h => h.row.code + (h.n > 1 ? ` (${h.n})` : '')).join(', ')}` : ''}`
     : t.noneWord;
+  if (sec.type === 'bait') return [first, `รวมกัดแทะ ${c.hitSt} สถานี จาก ${st} สถานี คิดเป็นร้อยละ ${fmt2(c.pct)} %`, `ระดับความเสี่ยง${LV_NAME[c.lv]}`].join('\n');
   return [first, `คิดเป็นร้อยละ ${fmt2(c.pct)} % ${t.of}`, `จาก${t.trapWord}ทั้งหมด ${st} สถานี (จุด) ระดับความเสี่ยง${LV_NAME[c.lv]}`].join('\n');
 }
 function iltAnalysis(cfg, sec, data) {
@@ -352,13 +355,13 @@ function renderSecEditor() {
       ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
-      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · นับเป็นจุดที่ถูกกัดแทะ (1 จุดนับได้สูงสุด ' + sec.checks + ' ครั้ง/เดือน)' : ''}</span></div>`;
+      <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · บันทึกเป็นก้อน · % คิดจากจำนวนสถานีที่ถูกกัดแทะ ÷ ' + sec.stations + ' สถานี' : ''}</span></div>`;
   }
   m.innerHTML = `<div class="card"><h2>${esc(sec.title)}</h2><div class="muted small">${esc(t.report)} · ${rows.length} แถว</div>
      <div class="stat" id="liveStat"></div>${table}</div>${textFields(sec)}`;
   const live = () => {
     const c = calc(cfg, sec, S.data);
-    $('#liveStat').innerHTML = `<div><span class="small muted">รวม</span><b>${c.total} ${t.unit}</b></div><div><span class="small muted">คิดเป็นร้อยละ</span><b>${fmt2(c.pct)} %</b></div>
+    $('#liveStat').innerHTML = `<div><span class="small muted">รวม</span><b>${c.total} ${t.unit}</b></div>${sec.type === 'bait' ? `<div><span class="small muted">สถานีที่ถูกกัดแทะ</span><b>${c.hitSt} / ${c.stations} สถานี</b></div>` : ''}<div><span class="small muted">คิดเป็นร้อยละ</span><b>${fmt2(c.pct)} %</b></div>
       <div><span class="small muted">ระดับความเสี่ยง</span><b><span class="badge lv${c.lv}" style="font-size:16px">${LV_NAME[c.lv]}</span></b></div>
       ${sec.type === 'ilt' ? `<div><span class="small muted">มากที่สุด</span><b>${c.top.map(p => p.row.code + ' (' + p.total + ')').join(', ') || '-'}</b></div>` : `<div><span class="small muted">จุดที่พบ</span><b>${c.hits.map(h => h.row.code).join(', ') || '-'}</b></div>`}`;
     const ta = $('[data-tf="summary"]', m); if (ta) ta.placeholder = 'อัตโนมัติ:\n' + autoSummary(cfg, sec, S.data);
@@ -369,7 +372,7 @@ function renderSecEditor() {
     if (val === '') return;
     const n = Number(val);
     if (!Number.isInteger(n) || n < 0) { inp.classList.add('bad'); inp.title = 'ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป'; return; }
-    if (sec.type === 'bait' && n > (t.maxPerRow || 2)) { inp.classList.add('warn'); inp.title = 'เกินจำนวนครั้งที่ตรวจเช็คต่อจุด — ตรวจสอบอีกครั้ง'; }
+    if (sec.type === 'bait' && n > (t.maxPerRow || 2)) { inp.classList.add('warn'); inp.title = 'เกิน 2 ก้อนต่อจุด — ตรวจสอบอีกครั้ง'; }
     if (sec.type !== 'ilt' && sec.type !== 'bait' && n > 20) { inp.classList.add('warn'); inp.title = 'ค่าสูงผิดปกติ — ตรวจสอบอีกครั้ง'; }
   };
   $$('[data-v]', m).forEach(i => { validate(i); i.oninput = () => { validate(i); if (i.value === '') delete d.v[i.dataset.v]; else d.v[i.dataset.v] = Number(i.value); markDirty(true); live(); }; });
@@ -621,8 +624,11 @@ function buildReport(el) {
     const tdata = rows.map(rw => { const vals = months.map(m => { const v = sv(m)[rw.id]; return v === undefined || v === null || v === '' ? null : Number(v); }); return { rw, vals, tot: sum(vals) }; });
     const monthHas = months.map(m => year[m] && Object.keys(sv(m)).length > 0);
     const mt = months.map((m, i) => monthHas[i] ? sum(tdata.map(x => x.vals[i])) : null);
-    const mp = mt.map(v => v === null ? null : v / c.denom * 100);
-    return { c, rows, tdata, mt, mp, nHas: monthHas.filter(Boolean).length || 1, grand: sum(mt.filter(v => v !== null)) };
+    const mh = months.map((m, i) => monthHas[i] ? new Set(tdata.filter(x => x.vals[i] > 0).map(x => x.rw.code)).size : null);
+    const bait = sec.type === 'bait', nHas = monthHas.filter(Boolean).length || 1, grand = sum(mt.filter(v => v !== null));
+    const mp = (bait ? mh : mt).map(v => v === null ? null : v / c.denom * 100);
+    const overall = (bait ? sum(mh.filter(v => v !== null)) : grand) / (c.denom * nHas) * 100;
+    return { c, rows, tdata, mt, mh, mp, nHas, grand, overall, bait };
   };
   const chartBox = (sec, k) => {
     const t = TYPES[sec.type], cid = 'ch_' + sec.id + '_' + PAGE_NO;
@@ -649,8 +655,9 @@ function buildReport(el) {
       const head = `<table class="rt"><thead><tr><th rowspan="2" style="width:48px">หมายเลข<br>สถานี</th><th rowspan="2">พื้นที่</th><th colspan="12" class="mo">${fyLabel(r.month)}</th><th rowspan="2">รวม</th></tr><tr>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr></thead><tbody>`;
       const rowHtml = x => `<tr ${rowSt(x.rw)}><td><b>${esc(x.rw.code)}</b></td><td class="l">${locHtml(sec)(x.rw)}</td>${x.vals.map((v, i) => `<td class="${i === ci ? 'cur' : ''}">${v ?? ''}</td>`).join('')}<td>${x.tot}</td></tr>`;
       const foot = `<tr class="tot"><td colspan="2">${esc(t.totalLabel)}</td>${k.mt.map(v => `<td>${v ?? ''}</td>`).join('')}<td>${k.grand}</td></tr>
-        <tr class="pct"><td colspan="2">คิดเป็นร้อยละ (${esc(t.of)})</td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}<td>${fmt2(k.grand / (k.c.denom * k.nHas) * 100)}</td></tr></tbody></table>`;
-      const note = `<div class="rnote"><b>หมายเหตุ :</b> ${esc(autoSummary(cfg, sec, d).split('\n').slice(0, 2).join(' '))} จาก${esc(t.trapWord)}ทั้งหมด ${sec.stations} สถานี (จุด)</div>`;
+        ${k.bait ? `<tr class="tot"><td colspan="2">จำนวนสถานีที่ถูกกัดแทะ (จาก ${sec.stations} สถานี)</td>${k.mh.map(v => `<td>${v ?? ''}</td>`).join('')}<td></td></tr>` : ''}
+        <tr class="pct"><td colspan="2">คิดเป็นร้อยละ (${esc(k.bait ? 'ของสถานีที่ถูกกัดแทะ' : t.of)})</td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}<td>${fmt2(k.overall)}</td></tr></tbody></table>`;
+      const note = `<div class="rnote"><b>หมายเหตุ :</b> ${esc(autoSummary(cfg, sec, d).split('\n').slice(0, 2).join(' '))}${k.bait ? '' : ` จาก${esc(t.trapWord)}ทั้งหมด ${sec.stations} สถานี (จุด)`}</div>`;
       const PER = 20, chunks = []; for (let i = 0; i < k.tdata.length; i += PER) chunks.push(k.tdata.slice(i, i + PER));
       chunks.forEach((ch, i) => { const last = i === chunks.length - 1;
         html += page((i ? '' : pageHead(t.report, area.name)) + head + ch.map(rowHtml).join('') + (last ? foot + note + (withChart && k.tdata.length <= 12 ? chartBox(sec, k) : '') : '</tbody></table>'), { sec: sec.id, label: lblOf(sec) }); });
