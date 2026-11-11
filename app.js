@@ -857,7 +857,7 @@ function buildReport(el) {
       const id = 'chm_' + sec.id + '_' + rw.id.replace(/[^a-zA-Z0-9]/g, '_') + '_' + PAGE_NO;
       const data = months.map(m => { const x = sv(m)[rw.id]; return x && x.c ? sum(x.c) : null; });
       charts.push({ id, type: 'line', labels: months.map(m => TH_MS[ym(m).m - 1]), sets: [{ label: 'Total', data, color: '#1f4e9d' }], max: 250, w: o === 'P' ? 900 : 500, h: o === 'P' ? 230 : 190 });
-      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
+      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px;color:#fff;font-weight:700">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
   }
   // page order copied from the customer's original PDF reports
   const L = n => Array.from({ length: n }, (_, i) => i);
