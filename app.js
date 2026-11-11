@@ -73,6 +73,16 @@ const DEFAULT_COLORS = [
   { c: '#548235', name: 'เขียว', desc: 'แทนอุปกรณ์ที่ติดตั้งในบริเวณพื้นที่ส่วนผลิตเครื่องมือแพทย์' },
   { c: '#000000', name: 'ดำ', desc: 'แทนอุปกรณ์ที่ติดตั้งในบริเวณพื้นที่ห้องปฏิบัติการสกัดสารจากพืชและสมุนไพร (PEL) เดิมในสัญญาเก่า' }];
 const colorDefs = cfg => cfg.colorDefs || DEFAULT_COLORS;
+const locRich = rw => rw.rich && rw.rich.length ? rw.rich.map(x => x.c ? `<span style="color:${esc(x.c)}">${esc(x.t)}</span>` : esc(x.t)).join('') : esc(rw.loc || '');
+function colorBreak(cfg, sec, d) {
+  const t = TYPES[sec.type], ilt = sec.type === 'ilt', rows = secRows(cfg, sec), v = secVals(cfg, sec, d), c = ilt ? calc(cfg, sec, d) : null;
+  const val = rw => ilt ? ((c.per.find(p => p.row.id === rw.id) || {}).total || 0) : (Number(v[rw.id]) || 0);
+  const g = new Map(); rows.forEach(rw => { const k = (cfg.rowColors || {})[rw.id] || ''; if (!g.has(k)) g.set(k, []); g.get(k).push(rw); });
+  const defs = colorDefs(cfg), su = ilt ? 'เครื่อง' : 'สถานี';
+  return [...g.entries()].map(([k, rs]) => { const df = defs.find(x => x.c === k), tot = sum(rs.map(val)), hit = rs.filter(rw => val(rw) > 0);
+    return { c: k || '#000', txt: `${df ? 'จุดติดตั้งสี' + df.name : 'จุดติดตั้งไม่ระบุสี'} จำนวน ${rs.length} ${su} พบทั้งหมด ${tot} ${t.unit}${hit.length ? ` ที่จุด ${hit.map(rw => rw.code + (val(rw) > 1 ? ` (${val(rw)} ${t.unit})` : '')).join(', ')}` : ''}` }; });
+}
+const colorBreakHtml = (cfg, sec, d) => colorBreak(cfg, sec, d).map(x => `<div style="color:${x.c}">- ${esc(x.txt)}</div>`).join('');
 function colorLegend(cfg, used) {
   const defs = colorDefs(cfg).filter(x => used.includes(x.c) && x.desc);
   return defs.length ? `<div class="rnote" style="margin-top:10px"><b>หมายเหตุ</b>${defs.map(x => `<div style="color:${x.c}">สี${esc(x.name)} ${esc(x.desc)}</div>`).join('')}</div>` : '';
@@ -151,7 +161,7 @@ function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sec
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
 function secRows(cfg, sec, m = curMonth(), all = false) {
-  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x) && (all || effSet(r, x) !== 1);
+  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x);
   if (!m) return rows;
   if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => ok(r, x))) : rows; }
   return rows.filter(r => ok(r, m));
@@ -187,14 +197,16 @@ function autoSummary(cfg, sec, data) {
     return lines.join('\n');
   }
   const first = c.total > 0
-    ? `${t.hitWord} จำนวน ${c.total} ${t.unit}${c.hits.length ? ` ที่จุด ${c.hits.map(h => h.row.code + (h.n > 1 ? ` (${h.n})` : '')).join(', ')}` : ''}`
+    ? `${t.hitWord} จำนวน ${c.total} ${t.unit}${c.hits.length ? ` ที่จุด ${c.hits.map(h => h.row.code + (h.n > 1 ? ` (${h.n} ${t.unit})` : '')).join(', ')}` : ''}`
     : t.noneWord;
   if (sec.type === 'bait') return [first, `รวมกัดแทะ ${c.hitSt} สถานี จาก ${st} สถานี คิดเป็นร้อยละ ${fmt2(c.pct)} %`, `ระดับความเสี่ยง${LV_NAME[c.lv]}`].join('\n');
   return [first, `คิดเป็นร้อยละ ${fmt2(c.pct)} % ${t.of}`, `จาก${t.trapWord}ทั้งหมด ${st} สถานี (จุด) ระดับความเสี่ยง${LV_NAME[c.lv]}`].join('\n');
 }
 function iltAnalysis(cfg, sec, data) {
-  const c = calc(cfg, sec, data); if (!c.top.length) return 'ไม่พบแมลงติดเครื่องดักแมลงในเดือนนี้';
-  return [`จุดติดตั้งเครื่องที่ ${c.top.map(p => p.row.code).join(', ')} มีแมลงติดมากที่สุด ตามลำดับ`,
+  const c = calc(cfg, sec, data), m = data && data.month || (S.report && S.report.month);
+  const head = [`สรุปประจำเดือน${m ? monthLong(m) : ''} จากการตรวจจำนวน ${secRows(cfg, sec).length} เครื่อง พบทั้งหมด ${c.total} ตัว`, 'แยกสรุปตามสีจุดติดตั้ง', ...colorBreak(cfg, sec, data).map(x => '- ' + x.txt)];
+  if (!c.top.length) return [...head, 'ไม่พบแมลงติดเครื่องดักแมลงในเดือนนี้'].join('\n');
+  return [...head, `จุดติดตั้งเครื่องที่ ${c.top.map(p => p.row.code).join(', ')} มีแมลงติดมากที่สุด ตามลำดับ`,
     ...c.top.map(p => `เครื่องที่ ${p.row.code} มีแมลงติดกับดักทั้งหมด ${p.total} ตัว`),
     `ทีม AGA ต้องเฝ้าระวังบริเวณเครื่องที่ ${c.top[0].row.code} มากที่สุด เนื่องจากพบแมลงติดกับดักมากกว่าจุดอื่น`].join('\n');
 }
@@ -401,7 +413,7 @@ function renderSecEditor() {
   let table;
   if (sec.type === 'ilt') {
     table = `<div style="overflow:auto"><table class="inp"><thead><tr><th>No.</th><th>พื้นที่ทำบริการ</th>${INSECTS.map(x => `<th style="min-width:60px">${x}</th>`).join('')}<th>รวม</th><th title="ทำความสะอาด">ทำความ<br>สะอาด</th><th title="ตรวจเช็คหลอดไฟ">เช็ค<br>หลอดไฟ</th><th title="เปลี่ยนแผ่นกาว">เปลี่ยน<br>แผ่นกาว</th></tr></thead><tbody>
-      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${esc(r.loc)}</td>
+      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${locRich(r)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td>
         ${INSECTS.map((_, i) => `<td><input type="number" min="0" step="1" data-ilt="${r.id}" data-i="${i}" value="${c[i] ?? ''}" placeholder="-"></td>`).join('')}
         <td class="prev" data-rt="${r.id}"><b>${sum(c)}</b></td>
         ${['clean', 'bulb', 'glue'].map(f => `<td style="text-align:center"><input type="checkbox" data-chk="${r.id}" data-f="${f}" ${x[f] ? 'checked' : ''}></td>`).join('')}
@@ -411,7 +423,7 @@ function renderSecEditor() {
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง</button><button class="btn sm" id="chkAll">✓ ทำความสะอาด/เช็คหลอดไฟ ทุกเครื่อง</button><span class="small muted">ค่าฐานคำนวณ % = ${sec.base || '-'} (แก้ได้ที่ ⚙️ ตั้งค่า)</span></div>`;
   } else {
     table = `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้ง</th><th>เดือนก่อน<br><span class="small">${monthShort(prevKey)}</span></th><th>${monthShort(S.report.month)}<br><span class="small">(${t.unit})</span></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
+      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${locRich(r)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
       <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
@@ -542,7 +554,7 @@ function renderSettings() {
          ${sec.type === 'ilt' ? `<div class="field"><label>ค่าฐานคำนวณ % (จำนวนแมลงที่ = 100%)</label><input type="number" data-st="${ai}.${si}.base" value="${sec.base || ''}"></div>` : `<div class="field"><label>จำนวนครั้งตรวจเช็ค/เดือน</label><input type="number" data-st="${ai}.${si}.checks" value="${sec.checks}"></div>`}</div>
          ${sec.same ? '' : `<div class="row" style="margin:6px 0">ดูรายชื่อ: ${[[0, 'ทั้งหมด'], [1, 'รอบที่ 1'], [2, 'รอบที่ 2']].map(([v, n]) => `<button class="btn sm ${(stView[sec.id] || 0) === v ? 'pri' : ''}" data-view-set="${sec.id}" data-v="${v}">${n} (${v ? sec.rows.filter(r => !r.set || r.set === v).length : sec.rows.length})</button>`).join('')}<span class="small muted">"ทั้ง 2 รอบ" = จุดที่ตำแหน่งเดิมทั้งสองรอบ</span></div>
            <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>รอบ (เดือนที่ย้าย)</th><th>ใช้ตั้งแต่</th><th>ใช้ถึง</th><th>สี</th><th></th></tr></thead><tbody>
-           ${sec.rows.map((r, ri) => (stView[sec.id] && r.set && r.set !== stView[sec.id]) ? '' : `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%;color:${(cfg.rowColors || {})[r.id] || '#000'}"></td>
+           ${sec.rows.map((r, ri) => (stView[sec.id] && r.set && r.set !== stView[sec.id]) ? '' : `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><div style="display:flex;gap:4px"><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="flex:1;color:${(cfg.rowColors || {})[r.id] || '#000'}"><button class="btn sm" data-rrich="${ai}.${si}.${ri}" title="แก้ชื่อและใส่หลายสีในแถวเดียว">🎨${r.rich ? '✓' : ''}</button></div></td>
              <td><select data-rs="${ai}.${si}.${ri}">${[['', 'ทั้ง 2 รอบ'], ['1', 'รอบที่ 1'], ['2', 'รอบที่ 2']].map(([v, n]) => `<option value="${v}" ${String(r.set || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
              <td><input type="month" data-rm="${ai}.${si}.${ri}.since" value="${esc(r.since || '')}" style="width:120px"></td><td><input type="month" data-rm="${ai}.${si}.${ri}.until" value="${esc(r.until || '')}" style="width:120px"></td>
              <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${[['', 'ไม่กำหนด'], ...colorDefs(cfg).map(x => [x.c, x.name])].map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></td>
@@ -562,7 +574,23 @@ function renderSettings() {
     $$('[data-c]').forEach(i => i.oninput = () => cfg[i.dataset.c] = i.value);
     $$('[data-an]').forEach(i => i.oninput = () => cfg.areas[+i.dataset.an].name = i.value);
     $$('[data-st]').forEach(i => i.oninput = () => { const [a, b, f] = i.dataset.st.split('.'); cfg.areas[a].sections[b][f] = i.type === 'number' ? Number(i.value) : i.value; });
-    $$('[data-rw]').forEach(i => i.oninput = () => { const [a, b, r, f] = i.dataset.rw.split('.'); cfg.areas[a].sections[b].rows[r][f] = i.value; });
+    $$('[data-rw]').forEach(i => i.oninput = () => { const [a, b, r, f] = i.dataset.rw.split('.'), row = cfg.areas[a].sections[b].rows[r]; row[f] = i.value; if (f === 'loc') delete row.rich; });
+    $$('[data-rrich]').forEach(x => x.onclick = async () => {
+      const [a, b, r] = x.dataset.rrich.split('.').map(Number), row = cfg.areas[a].sections[b].rows[r], base = (cfg.rowColors || {})[row.id] || '#000000';
+      const sw = [...colorDefs(cfg).map(y => [y.c, y.name]), ['#ff0000', 'แดง']];
+      const pm = promptModal(`ชื่อพื้นที่ ${esc(row.code)} (หลายสี)`, `<div class="small muted">เลือกข้อความแล้วกดสีที่ต้องการ · "สีของแถว" = กลับเป็นสีหลักของแถว</div>
+        <div class="row" style="margin:6px 0;flex-wrap:wrap;gap:4px">${sw.map(([c, n]) => `<button class="btn sm" data-sw="${c}" style="color:${c};font-weight:700">${esc(n)}</button>`).join('')}<button class="btn sm" data-sw="">สีของแถว</button></div>
+        <div id="rtEd" contenteditable="true" style="border:1px solid var(--line);border-radius:6px;padding:8px;min-height:44px;color:${base}">${locRich(row)}</div>`,
+        () => { const segs = [], hex = c => { const m = String(c).match(/\d+/g); return m && /rgb/.test(c) ? '#' + m.slice(0, 3).map(n => (+n).toString(16).padStart(2, '0')).join('') : c; };
+          const walk = (n, c) => { if (n.nodeType === 3) { if (n.nodeValue) segs.push({ t: n.nodeValue, c }); return; } if (n.nodeName === 'BR') { segs.push({ t: ' ', c }); return; } const cc = (n.style && n.style.color) ? hex(n.style.color) : (n.getAttribute && n.getAttribute('color')) || c; n.childNodes.forEach(k => walk(k, cc)); };
+          $('#rtEd').childNodes.forEach(k => walk(k, ''));
+          const out = []; segs.forEach(sg => { if (sg.c && sg.c.toLowerCase() === base.toLowerCase()) sg.c = ''; const l = out[out.length - 1]; if (l && l.c === sg.c) l.t += sg.t; else out.push({ ...sg }); });
+          return out; }, 'บันทึก');
+      document.execCommand('styleWithCSS', false, true);
+      $$('[data-sw]').forEach(btn => { btn.onmousedown = e => e.preventDefault(); btn.onclick = () => document.execCommand('foreColor', false, btn.dataset.sw || base); });
+      const res = await pm; if (!res) return; row.loc = res.map(y => y.t).join('').replace(/\s+/g, ' ').trim();
+      if (res.some(y => y.c)) row.rich = res; else delete row.rich; draw(); toast('แก้ชื่อแล้ว — กด 💾 บันทึกการตั้งค่า');
+    });
     $$('[data-rc]').forEach(i => i.onchange = () => { cfg.rowColors = cfg.rowColors || {}; if (i.value) cfg.rowColors[i.dataset.rc] = i.value; else delete cfg.rowColors[i.dataset.rc]; draw(); });
     $$('[data-rdel]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rdel.split('.'); if (confirm('ลบจุดนี้? (ข้อมูลย้อนหลังของจุดนี้จะไม่แสดง)')) { cfg.areas[a].sections[b].rows.splice(r, 1); draw(); } });
     $$('[data-rup]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rup.split('.').map(Number); const rows = cfg.areas[a].sections[b].rows; if (r > 0) { [rows[r - 1], rows[r]] = [rows[r], rows[r - 1]]; draw(); } });
@@ -708,7 +736,7 @@ function buildReport(el) {
   // ---- page renderers (orientation P = portrait, default landscape) ----
   const S2 = id => findSec(cfg, id), A2 = sec => cfg.areas.find(a => a.sections.includes(sec));
   const lblOf = sec => `${sec.title} — ${A2(sec).name}`;
-  const locHtml = sec => rw => esc(rw.loc);
+  const locHtml = sec => rw => locRich(rw) + (rw.set ? ` <span class="red">${esc(roundTag(rw, md))}</span>` : '');
   const rowSt = rw => (cfg.rowColors || {})[rw.id] ? `style="color:${cfg.rowColors[rw.id]}"` : '';   // purple/pink/green per original report
   const countData = sec => {
     const c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
@@ -737,8 +765,8 @@ function buildReport(el) {
       const used = [...new Set(secs.flatMap(sec => rowsOf(sec).map(rw => (cfg.rowColors || {})[rw.id]).filter(Boolean)))];
       const note = set === 1 && dates[0] ? `หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[0])}` : set === 2 && dates[1] ? `* พื้นที่ปัจจุบัน เก็บผลตั้งแต่ ${esc(dates[1])} เป็นต้นไป` : '';
       html += page(pageHead('', secs[0].type === 'bait' && set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), nums = rows.map(rw => parseInt(rw.code)).filter(n => !isNaN(n)), L = (rows[0]?.code || '').replace(/\d+/, '');
-        return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))} (${nums.length ? Math.min(...nums) + L + ' - ' + Math.max(...nums) + L : ''})</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
-        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? esc(rw.loc) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('')
+        return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))}</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
+        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? locRich(rw) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('')
         + colorLegend(cfg, used) + (note ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:6px">${note}</div>` : ''),
         { sec: 'dev_' + ids.join('_') + (set ? '_' + set : ''), label: 'รายการอุปกรณ์ ' + secs.map(x => x.title).join(', '), cls: 'P' });
     },
@@ -832,6 +860,7 @@ function summaryBlock(secs, d, area) {
    <div class="k n">จำนวนการตรวจเช็ค</div><div class="v">${x.checks || 2} ครั้ง (ตรวจเช็ครอบบริการ และรอบติดตามผล)</div>
    <div class="k">สรุป</div><div class="v">การเข้าทำบริการ ประจำเดือน${monthLong(S.report.month)} (รอบบริการ และรอบติดตามผล)</div>
    <div class="k n">แสดงว่า</div><div class="v">${nl(secText(x, d, 'summary') || autoSummary(S.cfg, x, d)).replace(/(ระดับความเสี่ยง\S+)/, '<b>$1</b>')}</div>
+   <div class="k">แยกตามสีจุดติดตั้ง</div><div class="v">สรุปประจำเดือน${monthLong(S.report.month)} จากการตรวจจำนวน ${secRows(S.cfg, x).length} ${x.type === 'ilt' ? 'เครื่อง' : 'สถานี'} พบทั้งหมด ${sum(colorBreak(S.cfg, x, d).map(y => +(y.txt.match(/พบทั้งหมด (\d+)/) || [0, 0])[1]))} ${esc(tx.unit)}${colorBreakHtml(S.cfg, x, d)}</div>
    <div class="k">หมายเหตุ</div><div class="v">${nl(secText(x, d, 'remark'))}</div></div>`; }).join('') + `
    <div class="recs"><b><u>การปรับปรุงแก้ไข/ข้อเสนอแนะ</u></b><div class="who">โดย บริษัท แอ๊ดวานซ์ กรุ๊ป เอเซีย จำกัด</div><div class="txt">${nl(secText(sec, d, 'recAGA'))}</div>
    <div class="who">โดย ${esc(S.cfg.name)}</div><div class="txt">${nl(secText(sec, d, 'recClient'))}</div></div>
