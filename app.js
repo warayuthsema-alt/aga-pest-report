@@ -840,7 +840,7 @@ function buildReport(el) {
         ${yrows.map(y => `<tr><td>${TH_MS[ym(y.m).m - 1]}-${String(ym(y.m).y + 543).slice(2)}</td>${y.cat.map(n2 => `<td>${y.has ? n2 : ''}</td>`).join('')}<td>${y.has ? y.tot : ''}</td><td>${y.has ? fmt2(y.tot / c.base * 100) : ''}</td></tr>`).join('')}
         <tr class="tot"><td>รวม</td>${ycat.map(n2 => `<td>${n2}</td>`).join('')}<td>${ytot}</td><td>${fmt2(ytot / (c.base * 12) * 100)}</td></tr></tbody></table>`, { sec: sec.id, label: lblOf(sec) }); },
     iltBar: (id, o) => { const sec = S2(id), c = calc(cfg, sec, d), area = A2(sec), gid = 'chg_' + sec.id + '_' + PAGE_NO;
-      charts.push({ id: gid, type: 'bar', labels: c.per.map(p => p.row.code), tickColors: c.per.map(p => (cfg.rowColors || {})[p.row.id] || '#666'), sets: INSECTS.map((n2, i) => ({ label: n2, data: c.per.map(p => p.c[i] || 0), color: INS_COLORS[i] })), w: 1000, h: o === 'P' ? 420 : 260, legend: true });
+      charts.push({ id: gid, type: 'bar', labels: c.per.map(p => p.row.code), tickColors: c.per.map(() => '#000'), tickBold: true, sets: INSECTS.map((n2, i) => ({ label: n2, data: c.per.map(p => p.c[i] || 0), color: INS_COLORS[i] })), w: 1000, h: o === 'P' ? 420 : 260, legend: true });
       html += page(pageHead(`รายงานสรุปกราฟเครื่องดักแมลง ประจำเดือน ${monthLong(r.month)}`, 'ทำบริการ ณ ' + area.name, true) + `<div class="chartbox"><canvas id="${gid}"></canvas></div>`
         + `<div class="sumblk" style="margin-top:8px"><div class="k">วิเคราะห์ปัญหา</div><div class="v">${colorize(cfg, sec, d, nl(secText(sec, d, 'analysis') || iltAnalysis(cfg, sec, d)))}</div>
            <div class="k">คำแนะนำการป้องกัน</div><div class="v">${nl(d.sec[sec.id]?.prevent ?? '1. แนะนำปิดประตูทุกครั้งเมื่อไม่ใช้งาน เพื่อช่วยลดปัญหาแมลงบินเข้าสู่พื้นที่\n2. การสุขาภิบาลทำความสะอาด เช่น การล้างพื้นในจุดทิ้งขยะหรือโรงอาหาร')}</div>
@@ -857,7 +857,7 @@ function buildReport(el) {
       const id = 'chm_' + sec.id + '_' + rw.id.replace(/[^a-zA-Z0-9]/g, '_') + '_' + PAGE_NO;
       const data = months.map(m => { const x = sv(m)[rw.id]; return x && x.c ? sum(x.c) : null; });
       charts.push({ id, type: 'line', labels: months.map(m => TH_MS[ym(m).m - 1]), sets: [{ label: 'Total', data, color: '#1f4e9d' }], max: 250, w: o === 'P' ? 900 : 500, h: o === 'P' ? 230 : 190 });
-      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px;color:${(cfg.rowColors || {})[rw.id] || 'inherit'}">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
+      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
   }
   // page order copied from the customer's original PDF reports
   const L = n => Array.from({ length: n }, (_, i) => i);
@@ -920,7 +920,7 @@ function drawCharts(list) {
       type: c.type,
       data: { labels: c.labels, datasets: c.sets.map(s => ({ label: s.label, data: s.data, borderColor: s.color, backgroundColor: c.type === 'line' ? s.color : s.color, pointRadius: 3, borderWidth: c.type === 'line' ? 2 : 0, spanGaps: false, maxBarThickness: 26 })) },
       options: { responsive: false, devicePixelRatio: 2, animation: false, plugins: { legend: { display: !!c.legend, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { enabled: true }, vals: { small: c.small, pct: c.max === 100 } },
-        scales: { y: { beginAtZero: true, max: c.max || undefined, suggestedMax: c.max ? undefined : Math.max(5, Math.ceil(maxV * 1.25)), ticks: { font: { size: c.small ? 8 : 11 } } }, x: { offset: true, ticks: { font: { size: c.small ? 8 : 11 }, ...(c.tickColors ? { color: c.tickColors } : {}) } } } },
+        scales: { y: { beginAtZero: true, max: c.max || undefined, suggestedMax: c.max ? undefined : Math.max(5, Math.ceil(maxV * 1.25)), ticks: { font: { size: c.small ? 8 : 11 } } }, x: { offset: true, ticks: { font: { size: c.small ? 8 : 11 }, ...(c.tickColors ? { color: c.tickColors } : {}), ...(c.tickBold ? { font: { size: 12, weight: 'bold' } } : {}) } } } },
       plugins: [valuePlugin]
     });
     cv.style.width = '100%'; cv.style.maxWidth = c.w + 'px'; cv.style.height = 'auto'; cv.style.display = 'block'; cv.style.margin = '0 auto';
