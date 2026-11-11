@@ -67,7 +67,16 @@ const CRIT_DESC = [
   'คือ ระดับมาก พบในปริมาณสูง ต้องมีแผนในการสำรวจพื้นที่เพิ่มเติมเพื่อหาแนวทางการแก้ไข มีการเฝ้าระวังและติดตามผลอย่างต่อเนื่องมีการควบคุมอย่างมีขั้นตอน',
   'คือ ระดับระบาด พบปริมาณสูงมาก เข้าสู่ขั้นวิกฤต ต้องสำรวจเชิงลึกร่วมกับผู้เชี่ยวชาญต้องได้รับการกำจัด การแก้ไขและป้องกันอย่างเร่งด่วนเพื่อให้อยู่ในเกณฑ์ที่ควบคุมได้'];
 const LV_NAME = ['ต่ำ', 'กลาง', 'สูง', 'สูงมาก'];
-const ROW_COLORS = [['', 'ดำ'], ['#7030a0', 'ม่วง (ใช้ร่วมกัน)'], ['#d60093', 'ชมพู (ส่วนผลิตอาหารฯ)'], ['#548235', 'เขียว (ส่วนผลิตเครื่องมือแพทย์)'], ['#ff0000', 'แดง'], ['#1f4e9d', 'น้ำเงิน']];
+const DEFAULT_COLORS = [
+  { c: '#7030a0', name: 'ม่วง', desc: 'แทนอุปกรณ์ที่ติดตั้งร่วมกันในบริเวณพื้นที่ส่วนผลิตอาหารทางการแพทย์และบริเวณพื้นที่ส่วนผลิตเครื่องมือแพทย์' },
+  { c: '#d60093', name: 'ชมพู', desc: 'แทนอุปกรณ์ที่ติดตั้งในบริเวณพื้นที่ส่วนผลิตอาหารทางการแพทย์' },
+  { c: '#548235', name: 'เขียว', desc: 'แทนอุปกรณ์ที่ติดตั้งในบริเวณพื้นที่ส่วนผลิตเครื่องมือแพทย์' },
+  { c: '#000000', name: 'ดำ', desc: 'แทนอุปกรณ์ที่ติดตั้งในบริเวณพื้นที่ห้องปฏิบัติการสกัดสารจากพืชและสมุนไพร (PEL) เดิมในสัญญาเก่า' }];
+const colorDefs = cfg => cfg.colorDefs || DEFAULT_COLORS;
+function colorLegend(cfg, used) {
+  const defs = colorDefs(cfg).filter(x => used.includes(x.c) && x.desc);
+  return defs.length ? `<div class="rnote" style="margin-top:10px"><b>หมายเหตุ</b>${defs.map(x => `<div style="color:${x.c}">สี${esc(x.name)} ${esc(x.desc)}</div>`).join('')}</div>` : '';
+}
 const REC_AGA = '- สำรวจและตรวจเช็คอุปกรณ์ให้พร้อมใช้งานอยู่ตลอด';
 const REC_CLIENT = '- ไม่ควรหยิบจับหรือเคลื่อนย้ายอุปกรณ์ เครื่องมือ ซึ่งเป็นกับดักแมลงและสัตว์พาหะ ไม่ควรวางอุปกรณ์หรือวัสดุปิดทางกล่องกับดัก';
 const TYPES = {
@@ -108,12 +117,45 @@ function normRounds(cfg) {
   });
   return changed;
 }
+// shortcut: one-time import of the Oct-2569 station move (rounds-2026-10.json); drop once every site has roundsImport set
+async function importRounds(cfg, siteId) {
+  if (cfg.roundsImport || S.role !== 'advance') return false;
+  let src = {};
+  if (siteId === 'dental') { try { src = await (await fetch('rounds-2026-10.json')).json(); } catch { return false; } }
+  const norm = x => String(x).replace(/\s/g, '');
+  cfg.rowColors = cfg.rowColors || {};
+  allSections(cfg).forEach(({ sec }) => {
+    if (src[sec.id]) {
+      const old = sec.rows || [], taken = new Set();
+      sec.rows = src[sec.id].map(r => {
+        const hit = old.find(o => o.code === r.code && norm(o.loc) === norm(r.loc) && !taken.has(o.id));
+        const id = hit ? hit.id : r.nid; taken.add(id);
+        if (r.color) cfg.rowColors[id] = r.color;
+        const row = { id, code: r.code, loc: r.loc, o: r.o };
+        if (r.set) { row.set = r.set; row[r.set === 1 ? 'until' : 'since'] = '2026-10'; }
+        return row;
+      });
+    } else (sec.rows || []).forEach(rw => { if (rw.set === 1 && !rw.until) rw.until = '2026-10'; if (rw.set === 2 && !rw.since) rw.since = '2026-10'; });
+  });
+  cfg.roundsImport = '2026-10';
+  return true;
+}
 const roundDates = md => String((md && md.serviceDates) || '').split(/\s*,\s*/).filter(Boolean);
-const roundTag = (rw, md) => rw.set ? `(เก็บผล ${roundDates(md)[rw.set - 1] || 'รอบที่ ' + rw.set})` : '';
+const curMonth = () => (S.report && S.report.month) || '';
+// a station is listed from rw.since to rw.until (YYYY-MM); outside that window it has moved away
+const rowActive = (rw, m) => !m || ((!rw.until || m <= rw.until) && (!rw.since || m >= rw.since));
+// round tags only apply in the month a station moved (old spot = round 1 that month, new spot = round 2)
+const effSet = (rw, m) => (rw.set && (!(rw.until || rw.since) || m === (rw.until || rw.since))) ? rw.set : 0;
+const roundTag = (rw, md, m = curMonth()) => { const k = effSet(rw, m); return k ? `(เก็บผล ${roundDates(md)[k - 1] || 'รอบที่ ' + k})` : ''; };
 function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sections.forEach(s => out.push({ area: a, sec: s }))); return out; }
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
-function secRows(cfg, sec) { return srcSec(cfg, sec).rows || []; }
+function secRows(cfg, sec, m = curMonth()) {
+  const rows = srcSec(cfg, sec).rows || [];
+  if (!m) return rows;
+  if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => rowActive(r, x))) : rows; }
+  return rows.filter(r => rowActive(r, m));
+}
 function secVals(cfg, sec, data) { const s = srcSec(cfg, sec); return (data && data.sec && data.sec[s.id] && data.sec[s.id].v) || {}; }
 function calc(cfg, sec, data) {
   const rows = secRows(cfg, sec), v = secVals(cfg, sec, data), type = sec.type;
@@ -217,7 +259,7 @@ function renderTop() {
 }
 async function loadList() {
   S.cfg = siteObj().config;
-  if (S.cfg && S.cfg.areas && normRounds(S.cfg) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
+  if (S.cfg && S.cfg.areas && (normRounds(S.cfg) | await importRounds(S.cfg, S.siteId)) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
   S.reports = await rpc('pr_list_reports', { k: KEY, p_site: S.siteId });
   if (S.role === 'advance' && !S.links.length) { try { S.links = await rpc('pr_links', { k: KEY }); } catch { } }
 }
@@ -355,7 +397,7 @@ function renderSecEditor() {
     bindTextFields(m, sec); return;
   }
   const prevKey = addMonth(S.report.month, -1), prev = (S.year[prevKey] && S.year[prevKey].sec && S.year[prevKey].sec[sec.id] && S.year[prevKey].sec[sec.id].v) || {};
-  const rows = sec.rows; d.v = d.v || {};
+  const rows = secRows(cfg, sec); d.v = d.v || {};
   let table;
   if (sec.type === 'ilt') {
     table = `<div style="overflow:auto"><table class="inp"><thead><tr><th>No.</th><th>พื้นที่ทำบริการ</th>${INSECTS.map(x => `<th style="min-width:60px">${x}</th>`).join('')}<th>รวม</th><th title="ทำความสะอาด">ทำความ<br>สะอาด</th><th title="ตรวจเช็คหลอดไฟ">เช็ค<br>หลอดไฟ</th><th title="เปลี่ยนแผ่นกาว">เปลี่ยน<br>แผ่นกาว</th></tr></thead><tbody>
@@ -499,12 +541,17 @@ function renderSettings() {
          <div class="field"><label>จำนวนสถานี (ใช้คำนวณ %)</label><input type="number" data-st="${ai}.${si}.stations" value="${sec.stations}"></div>
          ${sec.type === 'ilt' ? `<div class="field"><label>ค่าฐานคำนวณ % (จำนวนแมลงที่ = 100%)</label><input type="number" data-st="${ai}.${si}.base" value="${sec.base || ''}"></div>` : `<div class="field"><label>จำนวนครั้งตรวจเช็ค/เดือน</label><input type="number" data-st="${ai}.${si}.checks" value="${sec.checks}"></div>`}</div>
          ${sec.same ? '' : `<div class="row" style="margin:6px 0">ดูรายชื่อ: ${[[0, 'ทั้งหมด'], [1, 'รอบที่ 1'], [2, 'รอบที่ 2']].map(([v, n]) => `<button class="btn sm ${(stView[sec.id] || 0) === v ? 'pri' : ''}" data-view-set="${sec.id}" data-v="${v}">${n} (${v ? sec.rows.filter(r => !r.set || r.set === v).length : sec.rows.length})</button>`).join('')}<span class="small muted">"ทั้ง 2 รอบ" = จุดที่ตำแหน่งเดิมทั้งสองรอบ</span></div>
-           <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>รอบ</th><th>สี</th><th></th></tr></thead><tbody>
+           <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>รอบ (เดือนที่ย้าย)</th><th>ใช้ตั้งแต่</th><th>ใช้ถึง</th><th>สี</th><th></th></tr></thead><tbody>
            ${sec.rows.map((r, ri) => (stView[sec.id] && r.set && r.set !== stView[sec.id]) ? '' : `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="width:100%;color:${(cfg.rowColors || {})[r.id] || '#000'}"></td>
              <td><select data-rs="${ai}.${si}.${ri}">${[['', 'ทั้ง 2 รอบ'], ['1', 'รอบที่ 1'], ['2', 'รอบที่ 2']].map(([v, n]) => `<option value="${v}" ${String(r.set || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
-             <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${ROW_COLORS.map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
-             <td style="white-space:nowrap"><button class="btn sm" data-rup="${ai}.${si}.${ri}">↑</button> <button class="btn sm danger" data-rdel="${ai}.${si}.${ri}">ลบ</button></td></tr>`).join('')}</tbody></table>
+             <td><input type="month" data-rm="${ai}.${si}.${ri}.since" value="${esc(r.since || '')}" style="width:120px"></td><td><input type="month" data-rm="${ai}.${si}.${ri}.until" value="${esc(r.until || '')}" style="width:120px"></td>
+             <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${[['', 'ไม่กำหนด'], ...colorDefs(cfg).map(x => [x.c, x.name])].map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></td>
+             <td style="white-space:nowrap"><button class="btn sm" data-rmove="${ai}.${si}.${ri}" title="ย้ายจุดไปตำแหน่งใหม่">⇄ ย้าย</button> <button class="btn sm" data-rup="${ai}.${si}.${ri}">↑</button> <button class="btn sm danger" data-rdel="${ai}.${si}.${ri}">ลบ</button></td></tr>`).join('')}</tbody></table>
            <button class="btn sm" data-radd="${ai}.${si}" style="margin-top:6px">＋ เพิ่มจุด</button>`}</details>`).join('')}</div>`).join('')}
+     <div class="card"><h3>สีอุปกรณ์และคำอธิบาย</h3><div class="small muted">คำอธิบายจะแสดงเป็น "หมายเหตุ" ท้ายหน้ารายการอุปกรณ์ ตามสีที่มีในหน้านั้น</div>
+       <table class="inp" style="margin-top:8px"><thead><tr><th>สี</th><th>ชื่อสี</th><th>คำอธิบาย</th><th></th></tr></thead><tbody>
+       ${colorDefs(cfg).map((x, i) => `<tr><td><input type="color" data-cd="${i}.c" value="${x.c}"></td><td><input data-cd="${i}.name" value="${esc(x.name)}" style="width:90px;color:${x.c};font-weight:700"></td><td><input data-cd="${i}.desc" value="${esc(x.desc || '')}" style="width:100%"></td><td><button class="btn sm danger" data-cddel="${i}">ลบ</button></td></tr>`).join('')}</tbody></table>
+       <button class="btn sm" id="cdAdd" style="margin-top:6px">＋ เพิ่มสี</button></div>
      <div class="card"><h3>แผนผังจุดติดตั้ง (Layout)</h3><div class="photos">${(cfg.layouts || []).map((l, i) => `<div class="photo-card"><img src="${esc(l.src)}" style="object-fit:contain">
        <div class="field"><label>ชื่อแผนผัง</label><input data-ly="${i}.title" value="${esc(l.title)}"></div>
        <div class="field"><label>พื้นที่</label><select data-ly="${i}.area">${cfg.areas.map(a => `<option value="${a.id}" ${a.id === l.area ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
@@ -522,6 +569,28 @@ function renderSettings() {
     $$('[data-radd]').forEach(x => x.onclick = () => { const [a, b] = x.dataset.radd.split('.'); const sec = cfg.areas[a].sections[b]; sec.rows.push({ id: sec.id + '-n' + Date.now().toString(36), code: '', loc: '', ...(stView[sec.id] ? { set: stView[sec.id] } : {}) }); draw(); });
     $$('details[data-sid]').forEach(d => d.ontoggle = () => d.open ? stOpen.add(d.dataset.sid) : stOpen.delete(d.dataset.sid));
     $$('[data-view-set]').forEach(x => x.onclick = () => { stView[x.dataset.viewSet] = Number(x.dataset.v); draw(); });
+    const ownColors = () => (cfg.colorDefs = cfg.colorDefs || clone(DEFAULT_COLORS));
+    $$('[data-cd]').forEach(i => i.onchange = () => { const [n, f] = i.dataset.cd.split('.'); const defs = ownColors(), old = defs[n].c; defs[n][f] = i.value;
+      if (f === 'c') Object.keys(cfg.rowColors || {}).forEach(k => { if (cfg.rowColors[k] === old) cfg.rowColors[k] = i.value; }); draw(); });
+    $$('[data-cddel]').forEach(x => x.onclick = () => { if (confirm('ลบสีนี้? (จุดที่ใช้สีนี้จะกลับเป็นไม่กำหนดสี)')) { const defs = ownColors(), c = defs[+x.dataset.cddel].c; defs.splice(+x.dataset.cddel, 1); Object.keys(cfg.rowColors || {}).forEach(k => { if (cfg.rowColors[k] === c) delete cfg.rowColors[k]; }); draw(); } });
+    $('#cdAdd').onclick = () => { ownColors().push({ c: '#1f4e9d', name: 'สีใหม่', desc: '' }); draw(); };
+    $$('[data-rm]').forEach(i => i.onchange = () => { const [a, b, r, f] = i.dataset.rm.split('.'); const row = cfg.areas[a].sections[b].rows[r]; if (i.value) row[f] = i.value; else delete row[f]; });
+    $$('[data-rmove]').forEach(x => x.onclick = async () => {
+      const [a, b, r] = x.dataset.rmove.split('.').map(Number), sec = cfg.areas[a].sections[b], row = sec.rows[r];
+      const defM = S.reports[0]?.month ? addMonth(S.reports[0].month, 1) : keyOf(new Date().getFullYear(), new Date().getMonth() + 1);
+      const res = await promptModal(`ย้ายจุด ${esc(row.code)}`, `<div class="small muted">ตำแหน่งเดิม: ${esc(row.loc)}</div>
+        <div class="field" style="margin-top:8px"><label>ตำแหน่งใหม่</label><input id="mvLoc"></div>
+        <div class="grid2"><div class="field"><label>รหัสใหม่ (ถ้าเปลี่ยน)</label><input id="mvCode" value="${esc(row.code)}"></div><div class="field"><label>เดือนที่ย้าย</label><input type="month" id="mvMonth" value="${defM}"></div></div>
+        <div class="field"><label>สีของจุดใหม่</label><select id="mvColor">${[['', 'ไม่กำหนด'], ...colorDefs(cfg).map(y => [y.c, y.name])].map(([c, n]) => `<option value="${c}" ${((cfg.rowColors || {})[row.id] || '') === c ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+        <label class="small"><input type="checkbox" id="mvMid" checked> ย้ายระหว่างเดือน — เดือนนั้นตำแหน่งเดิมเป็นรอบที่ 1 และตำแหน่งใหม่เป็นรอบที่ 2</label>`,
+        () => ({ loc: $('#mvLoc').value.trim(), code: $('#mvCode').value.trim() || row.code, m: $('#mvMonth').value, color: $('#mvColor').value, mid: $('#mvMid').checked }), 'ย้ายจุด');
+      if (!res) return;
+      if (!res.loc || !res.m) { toast('กรุณาใส่ตำแหน่งใหม่และเดือนที่ย้าย', true); return; }
+      const nr = { id: sec.id + '-m' + Date.now().toString(36), code: res.code, loc: res.loc, since: res.m };
+      if (res.mid) { row.until = res.m; row.set = 1; nr.set = 2; } else { row.until = addMonth(res.m, -1); delete row.set; }
+      cfg.rowColors = cfg.rowColors || {}; if (res.color) cfg.rowColors[nr.id] = res.color;
+      sec.rows.splice(r + 1, 0, nr); stOpen.add(sec.id); draw(); toast('ย้ายจุดแล้ว — กด 💾 บันทึกการตั้งค่า');
+    });
     $$('[data-rs]').forEach(i => i.onchange = () => { const [a, b, r] = i.dataset.rs.split('.'); const row = cfg.areas[a].sections[b].rows[r]; if (i.value) row.set = Number(i.value); else delete row.set; draw(); });
     $$('[data-ly]').forEach(i => i.oninput = i.onchange = () => { const [n, f] = i.dataset.ly.split('.'); cfg.layouts[n][f] = i.value; });
     $$('[data-lydel]').forEach(x => x.onclick = () => { if (confirm('ลบแผนผังนี้?')) { cfg.layouts.splice(+x.dataset.lydel, 1); draw(); } });
@@ -642,7 +711,7 @@ function buildReport(el) {
   const locHtml = sec => rw => esc(rw.loc) + (rw.set ? ` <span class="red">${esc(roundTag(rw, md))}</span>` : '');
   const rowSt = rw => (cfg.rowColors || {})[rw.id] ? `style="color:${cfg.rowColors[rw.id]}"` : '';   // purple/pink/green per original report
   const countData = sec => {
-    const c = calc(cfg, sec, d), rows = secRows(cfg, sec), sv = m => secVals(cfg, sec, year[m] || {});
+    const c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
     const tdata = rows.map(rw => { const vals = months.map(m => { const v = sv(m)[rw.id]; return v === undefined || v === null || v === '' ? null : Number(v); }); return { rw, vals, tot: sum(vals) }; });
     const monthHas = months.map(m => year[m] && Object.keys(sv(m)).length > 0);
     const mt = months.map((m, i) => monthHas[i] ? sum(tdata.map(x => x.vals[i])) : null);
@@ -660,12 +729,17 @@ function buildReport(el) {
   const P = {
     area: a => html += page(`<div style="text-align:center;padding-top:80mm"><div style="font-size:30px;font-weight:700">รายงานปฏิบัติงานกำจัดสัตว์พาหะ</div><div style="font-size:30px;font-weight:700;margin:6mm 0">${esc(cfg.name)}</div><div style="font-size:30px;font-weight:700">${esc(cfg.areas.find(x => x.id === a).name)}</div></div>`, { sec: 'area_' + a, label: 'หน้าพื้นที่', cls: 'P' }),
     dev: (ids, set) => {
-      // set 1/2 = device list for the 1st/2nd collection date (rows tagged "(เก็บผล <other date>)" are left out)
-      const secs = ids.map(S2), area = A2(secs[0]), dates = String(md.serviceDates || '').split(/\s*,\s*/);
-      const rowsOf = sec => sec.rows.filter(rw => !set || !rw.set || rw.set === set);
-      html += page(pageHead('', set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), codes = rows.map(rw => rw.code);
-        return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))} (${esc(codes[0] || '')} - ${esc(codes[codes.length - 1] || '')})</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
-        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? esc(rw.loc) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('') + (set && dates[set - 1] ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:10px">หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[set - 1])}</div>` : ''),
+      const secs = ids.map(S2), area = A2(secs[0]), m = r.month, dates = roundDates(md);
+      // split pages only in a month where a station moved; otherwise round 1 page is skipped and round 2 is the normal list
+      const moving = secs.some(sec => (sec.rows || []).some(rw => effSet(rw, m)));
+      if (set && !moving) { if (set === 1) return; set = 0; }
+      const rowsOf = sec => { const rows = secRows(cfg, sec, m); return set ? rows.filter(rw => !effSet(rw, m) || effSet(rw, m) === set).sort((x, y) => ((x.o || [])[set - 1] ?? 999) - ((y.o || [])[set - 1] ?? 999)) : rows; };
+      const used = [...new Set(secs.flatMap(sec => rowsOf(sec).map(rw => (cfg.rowColors || {})[rw.id]).filter(Boolean)))];
+      const note = set === 1 && dates[0] ? `หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[0])}` : set === 2 && dates[1] ? `* พื้นที่ปัจจุบัน เก็บผลตั้งแต่ ${esc(dates[1])} เป็นต้นไป` : '';
+      html += page(pageHead('', secs[0].type === 'bait' && set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), nums = rows.map(rw => parseInt(rw.code)).filter(n => !isNaN(n)), L = (rows[0]?.code || '').replace(/\d+/, '');
+        return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))} (${nums.length ? Math.min(...nums) + L + ' - ' + Math.max(...nums) + L : ''})</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
+        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? esc(rw.loc) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('')
+        + colorLegend(cfg, used) + (note ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:6px">${note}</div>` : ''),
         { sec: 'dev_' + ids.join('_') + (set ? '_' + set : ''), label: 'รายการอุปกรณ์ ' + secs.map(x => x.title).join(', '), cls: 'P' });
     },
     layout: i => { const l = (cfg.layouts || [])[i]; if (!l) return; const an = (cfg.areas.find(a => a.id === l.area) || {}).name || '';
@@ -696,7 +770,7 @@ function buildReport(el) {
       html += page(pageHead(TYPES.ilt.name + 'บริเวณ' + area.name, null) + tbl + `<div class="rnote"><b>หมายเหตุ :</b> ${nl(iltTableNote(cfg, sec, d))}</div>` + (n ? machHtml(sec, from, n, o) : ''), { sec: sec.id, label: lblOf(sec), cls: o === 'P' ? 'P' : '' }); },
     iltMach: (id, from, n, o) => { const sec = S2(id);
       html += page(pageHead(`กราฟสรุปผลเครื่องดักแมลง ${fyLabel(r.month)}`, A2(sec).name) + machHtml(sec, from, n, o), { sec: sec.id, label: lblOf(sec), cls: o === 'P' ? 'P' : '' }); },
-    iltYear: id => { const sec = S2(id), c = calc(cfg, sec, d), rows = secRows(cfg, sec), sv = m => secVals(cfg, sec, year[m] || {});
+    iltYear: id => { const sec = S2(id), c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
       const yrows = months.map(m => { const vv = sv(m); const has = year[m] && Object.keys(vv).length; const cat = INSECTS.map((_, i) => sum(rows.map(rw => (vv[rw.id] && vv[rw.id].c && vv[rw.id].c[i]) || 0))); return { m, has, cat, tot: sum(cat) }; });
       const ycat = INSECTS.map((_, i) => sum(yrows.map(y => y.cat[i]))), ytot = sum(ycat);
       html += page(pageHead(`ผลรวมแมลงติดกับดัก เดือน ${fyLabel(r.month)}`, null) + `<table class="rt"><thead><tr><th>เดือน</th>${INSECTS.map(x => `<th>${x}</th>`).join('')}<th>รวม</th><th>% การติด</th></tr></thead><tbody>
@@ -715,7 +789,7 @@ function buildReport(el) {
         ${i + 2 >= ph.length && md.photoNote ? `<div class="rnote" style="margin-top:8px">${nl(md.photoNote)}</div>` : ''}`, { sec: 'photos', label: 'รายงานสำรวจปัญหา (รูปภาพ)' }); } }
   };
   function machHtml(sec, from, n, o) {
-    const rows = secRows(cfg, sec).slice(from, from + n), sv = m => secVals(cfg, sec, year[m] || {});
+    const rows = secRows(cfg, sec, 'fy').slice(from, from + n), sv = m => secVals(cfg, sec, year[m] || {});
     return `<div class="mini-grid ${o === 'P' ? 'one' : ''}">${rows.map(rw => {
       const id = 'chm_' + sec.id + '_' + rw.id.replace(/[^a-zA-Z0-9]/g, '_') + '_' + PAGE_NO;
       const data = months.map(m => { const x = sv(m)[rw.id]; return x && x.c ? sum(x.c) : null; });
@@ -730,10 +804,10 @@ function buildReport(el) {
     dental: [['area', 'food'], ['dev', ['fB', 'fA'], 1], ['layout', 0], ['dev', ['fB', 'fA'], 2], ['layout', 1], ['table', 'fA'], ['table', 'fB'], ['chart', 'fA'], ['chart', 'fB'], ['summary', ['fA', 'fB']],
       ['table', 'fG', 1], ['summary', ['fG']], ['table', 'fL'], ['chart', 'fL'], ['summary', ['fL']], ['table', 'fH'], ['chart', 'fH'], ['summary', ['fH']],
       ['iltTable', 'fF'], ['iltMach', 'fF', 0, 4], ['iltMach', 'fF', 4, 4], ['iltMach', 'fF', 8, 4], ['iltYear', 'fF'], ['iltBar', 'fF'], ['summary', ['fF']],
-      ...[2, 3, 4, 5, 6].map(i => ['layout', i]), ['dev', ['fH']], ['dev', ['fF']], ...[7, 8, 9, 10, 11].map(i => ['layout', i]), ['dev', ['fG', 'fL']],
+      ...[2, 3, 4, 5, 6].map(i => ['layout', i]), ['dev', ['fH'], 1], ['dev', ['fF', 'fG', 'fL'], 1], ...[7, 8, 9, 10, 11].map(i => ['layout', i]), ['dev', ['fH'], 2], ['dev', ['fF', 'fG', 'fL'], 2],
       ['area', 'med'], ['dev', ['fB', 'fA'], 1], ['layout', 12], ['dev', ['fB', 'fA'], 2], ['layout', 13], ['table', 'mA'], ['table', 'mB'], ['chart', 'mA'], ['chart', 'mB'], ['summary', ['mA', 'mB']],
       ['table', 'mG', 1], ['summary', ['mG']], ['table', 'mH'], ['summary', ['mH']], ['iltTable', 'mF'], ['iltMach', 'mF', 0, 4], ['iltMach', 'mF', 4, 4], ['iltMach', 'mF', 8, 4], ['iltYear', 'mF'], ['iltBar', 'mF'], ['summary', ['mF']],
-      ['table', 'mL', 1], ['summary', ['mL']], ['dev', ['mG']], ['dev', ['mH']], ['dev', ['mL']], ...[14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map(i => ['layout', i]), ['dev', ['mH']], ['dev', ['mF']], ['photos']]
+      ['table', 'mL', 1], ['summary', ['mL']], ['dev', ['mG', 'mF'], 1], ['dev', ['mH'], 1], ['dev', ['mL'], 1], ...[14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map(i => ['layout', i]), ['dev', ['mH'], 2], ['dev', ['mF', 'mG'], 2], ['dev', ['mL'], 2], ['photos']]
   };
   // shortcut: sites other than pel/dental get a generic order (areas → tables → summaries → devices → layouts)
   const order = ORDER[s.id] || [...allSections(cfg).flatMap(({ sec }) => sec.type === 'ilt' ? [['iltTable', sec.id], ['iltMach', sec.id, 0, 4], ['iltYear', sec.id], ['iltBar', sec.id], ['summary', [sec.id]]] : [['table', sec.id, 1], ['summary', [sec.id]]]),
