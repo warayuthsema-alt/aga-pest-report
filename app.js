@@ -150,11 +150,11 @@ const roundTag = (rw, md, m = curMonth()) => { const k = effSet(rw, m); return k
 function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sections.forEach(s => out.push({ area: a, sec: s }))); return out; }
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
-function secRows(cfg, sec, m = curMonth()) {
-  const rows = srcSec(cfg, sec).rows || [];
+function secRows(cfg, sec, m = curMonth(), all = false) {
+  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x) && (all || effSet(r, x) !== 1);
   if (!m) return rows;
-  if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => rowActive(r, x))) : rows; }
-  return rows.filter(r => rowActive(r, m));
+  if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => ok(r, x))) : rows; }
+  return rows.filter(r => ok(r, m));
 }
 function secVals(cfg, sec, data) { const s = srcSec(cfg, sec); return (data && data.sec && data.sec[s.id] && data.sec[s.id].v) || {}; }
 function calc(cfg, sec, data) {
@@ -401,7 +401,7 @@ function renderSecEditor() {
   let table;
   if (sec.type === 'ilt') {
     table = `<div style="overflow:auto"><table class="inp"><thead><tr><th>No.</th><th>พื้นที่ทำบริการ</th>${INSECTS.map(x => `<th style="min-width:60px">${x}</th>`).join('')}<th>รวม</th><th title="ทำความสะอาด">ทำความ<br>สะอาด</th><th title="ตรวจเช็คหลอดไฟ">เช็ค<br>หลอดไฟ</th><th title="เปลี่ยนแผ่นกาว">เปลี่ยน<br>แผ่นกาว</th></tr></thead><tbody>
-      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${esc(r.loc)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td>
+      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${esc(r.loc)}</td>
         ${INSECTS.map((_, i) => `<td><input type="number" min="0" step="1" data-ilt="${r.id}" data-i="${i}" value="${c[i] ?? ''}" placeholder="-"></td>`).join('')}
         <td class="prev" data-rt="${r.id}"><b>${sum(c)}</b></td>
         ${['clean', 'bulb', 'glue'].map(f => `<td style="text-align:center"><input type="checkbox" data-chk="${r.id}" data-f="${f}" ${x[f] ? 'checked' : ''}></td>`).join('')}
@@ -411,7 +411,7 @@ function renderSecEditor() {
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง</button><button class="btn sm" id="chkAll">✓ ทำความสะอาด/เช็คหลอดไฟ ทุกเครื่อง</button><span class="small muted">ค่าฐานคำนวณ % = ${sec.base || '-'} (แก้ได้ที่ ⚙️ ตั้งค่า)</span></div>`;
   } else {
     table = `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้ง</th><th>เดือนก่อน<br><span class="small">${monthShort(prevKey)}</span></th><th>${monthShort(S.report.month)}<br><span class="small">(${t.unit})</span></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
+      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${esc(r.loc)}</td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
       <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
@@ -708,7 +708,7 @@ function buildReport(el) {
   // ---- page renderers (orientation P = portrait, default landscape) ----
   const S2 = id => findSec(cfg, id), A2 = sec => cfg.areas.find(a => a.sections.includes(sec));
   const lblOf = sec => `${sec.title} — ${A2(sec).name}`;
-  const locHtml = sec => rw => esc(rw.loc) + (rw.set ? ` <span class="red">${esc(roundTag(rw, md))}</span>` : '');
+  const locHtml = sec => rw => esc(rw.loc);
   const rowSt = rw => (cfg.rowColors || {})[rw.id] ? `style="color:${cfg.rowColors[rw.id]}"` : '';   // purple/pink/green per original report
   const countData = sec => {
     const c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
@@ -733,7 +733,7 @@ function buildReport(el) {
       // split pages only in a month where a station moved; otherwise round 1 page is skipped and round 2 is the normal list
       const moving = secs.some(sec => (sec.rows || []).some(rw => effSet(rw, m)));
       if (set && !moving) { if (set === 1) return; set = 0; }
-      const rowsOf = sec => { const rows = secRows(cfg, sec, m); return set ? rows.filter(rw => !effSet(rw, m) || effSet(rw, m) === set).sort((x, y) => ((x.o || [])[set - 1] ?? 999) - ((y.o || [])[set - 1] ?? 999)) : rows; };
+      const rowsOf = sec => { const rows = secRows(cfg, sec, m, true); return set ? rows.filter(rw => !effSet(rw, m) || effSet(rw, m) === set).sort((x, y) => ((x.o || [])[set - 1] ?? 999) - ((y.o || [])[set - 1] ?? 999)) : rows; };
       const used = [...new Set(secs.flatMap(sec => rowsOf(sec).map(rw => (cfg.rowColors || {})[rw.id]).filter(Boolean)))];
       const note = set === 1 && dates[0] ? `หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[0])}` : set === 2 && dates[1] ? `* พื้นที่ปัจจุบัน เก็บผลตั้งแต่ ${esc(dates[1])} เป็นต้นไป` : '';
       html += page(pageHead('', secs[0].type === 'bait' && set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), nums = rows.map(rw => parseInt(rw.code)).filter(n => !isNaN(n)), L = (rows[0]?.code || '').replace(/\d+/, '');
