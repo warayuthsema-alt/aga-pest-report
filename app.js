@@ -82,6 +82,21 @@ function colorBreak(cfg, sec, d) {
   return [...g.entries()].map(([k, rs]) => { const df = defs.find(x => x.c === k), tot = sum(rs.map(val)), hit = rs.filter(rw => val(rw) > 0);
     return { c: k || '#000', txt: `${df ? 'จุดติดตั้งสี' + df.name : 'จุดติดตั้งไม่ระบุสี'} จำนวน ${rs.length} ${su} พบทั้งหมด ${tot} ${t.unit}${hit.length ? ` ที่จุด ${hit.map(rw => rw.code + (val(rw) > 1 ? ` (${val(rw)} ${t.unit})` : '')).join(', ')}` : ''}` }; });
 }
+function codeColors(cfg, sec, d) {
+  const rows = secRows(cfg, sec), v = secVals(cfg, sec, d || {}), ilt = sec.type === 'ilt', rc = cfg.rowColors || {}, m = {};
+  const val = rw => ilt ? sum(((v[rw.id] || {}).c || []).map(Number).filter(n => !isNaN(n))) : (Number(v[rw.id]) || 0);
+  rows.forEach(rw => { const c = rc[rw.id]; if (!c) return; const k = rw.code.replace(/\s/g, ''), hit = val(rw) > 0; if (!m[k] || (hit && !m[k].hit)) m[k] = { c, hit }; });
+  return m;
+}
+// colour every station code (and its "(n unit)" / its own "เครื่องที่ X ..." line) with that station's colour
+function colorize(cfg, sec, d, html) {
+  const m = codeColors(cfg, sec, d), col = k => m[k.replace(/\s/g, '')]?.c;
+  return html.split('<br>').map(line => {
+    const one = line.match(/^(เครื่องที่ )(\d{1,3}\s?[A-Z])(?![A-Za-z])/);
+    if (one && col(one[2])) return `<span style="color:${col(one[2])}">${line}</span>`;
+    return line.replace(/(?<![0-9A-Za-z#])(\d{1,3}\s?[A-Z])(?![A-Za-z0-9])( \(\d+ [^)<]*\))?/g, (a, k) => col(k) ? `<span style="color:${col(k)}">${a}</span>` : a);
+  }).join('<br>');
+}
 const colorBreakHtml = (cfg, sec, d) => colorBreak(cfg, sec, d).map(x => `<div style="color:${x.c}">- ${esc(x.txt)}</div>`).join('');
 function colorLegend(cfg, used) {
   const defs = colorDefs(cfg).filter(x => used.includes(x.c) && x.desc);
@@ -222,7 +237,7 @@ function autoSummary(cfg, sec, data) {
 }
 function iltAnalysis(cfg, sec, data) {
   const c = calc(cfg, sec, data), m = data && data.month || (S.report && S.report.month);
-  const head = [`สรุปประจำเดือน${m ? monthLong(m) : ''} จากการตรวจจำนวน ${secRows(cfg, sec).length} เครื่อง พบทั้งหมด ${c.total} ตัว`, 'แยกสรุปตามสีจุดติดตั้ง', ...colorBreak(cfg, sec, data).map(x => '- ' + x.txt)];
+  const head = [`สรุปประจำเดือน${m ? monthLong(m) : ''} จากการตรวจจำนวน ${secRows(cfg, sec).length} เครื่อง พบทั้งหมด ${c.total} ตัว`];
   if (!c.top.length) return [...head, 'ไม่พบแมลงติดเครื่องดักแมลงในเดือนนี้'].join('\n');
   return [...head, `จุดติดตั้งเครื่องที่ ${c.top.map(p => p.row.code).join(', ')} มีแมลงติดมากที่สุด ตามลำดับ`,
     ...c.top.map(p => `เครื่องที่ ${p.row.code} มีแมลงติดกับดักทั้งหมด ${p.total} ตัว`),
@@ -800,7 +815,7 @@ function buildReport(el) {
       const foot = `<tr class="tot"><td colspan="2">${esc(t.totalLabel)}</td>${k.mt.map(v => `<td>${v ?? ''}</td>`).join('')}<td>${k.grand}</td></tr>
         ${k.bait ? `<tr class="tot"><td colspan="2">จำนวนสถานีที่ถูกกัดแทะ (จาก ${sec.stations} สถานี)</td>${k.mh.map(v => `<td>${v ?? ''}</td>`).join('')}<td></td></tr>` : ''}
         <tr class="pct"><td colspan="2">คิดเป็นร้อยละ (${esc(t.of)})</td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}<td>${fmt2(k.overall)}</td></tr></tbody></table>`;
-      const note = `<div class="rnote"><b>หมายเหตุ :</b> ${esc(autoSummary(cfg, sec, d).split('\n').slice(0, 2).join(' '))}${k.bait ? '' : ` จาก${esc(t.trapWord)}ทั้งหมด ${sec.stations} สถานี (จุด)`}</div>`;
+      const note = `<div class="rnote"><b>หมายเหตุ :</b> ${colorize(cfg, sec, d, esc(autoSummary(cfg, sec, d).split('\n').slice(0, 2).join(' ')))}${k.bait ? '' : ` จาก${esc(t.trapWord)}ทั้งหมด ${sec.stations} สถานี (จุด)`}</div>`;
       const PER = 20, chunks = []; for (let i = 0; i < k.tdata.length; i += PER) chunks.push(k.tdata.slice(i, i + PER));
       chunks.forEach((ch, i) => { const last = i === chunks.length - 1;
         html += page((i ? '' : pageHead(t.report, area.name)) + head + ch.map(rowHtml).join('') + (last ? foot + note + (withChart && k.tdata.length <= 12 ? chartBox(sec, k) : '') : '</tbody></table>'), { sec: sec.id, label: lblOf(sec) }); });
@@ -825,9 +840,9 @@ function buildReport(el) {
         ${yrows.map(y => `<tr><td>${TH_MS[ym(y.m).m - 1]}-${String(ym(y.m).y + 543).slice(2)}</td>${y.cat.map(n2 => `<td>${y.has ? n2 : ''}</td>`).join('')}<td>${y.has ? y.tot : ''}</td><td>${y.has ? fmt2(y.tot / c.base * 100) : ''}</td></tr>`).join('')}
         <tr class="tot"><td>รวม</td>${ycat.map(n2 => `<td>${n2}</td>`).join('')}<td>${ytot}</td><td>${fmt2(ytot / (c.base * 12) * 100)}</td></tr></tbody></table>`, { sec: sec.id, label: lblOf(sec) }); },
     iltBar: (id, o) => { const sec = S2(id), c = calc(cfg, sec, d), area = A2(sec), gid = 'chg_' + sec.id + '_' + PAGE_NO;
-      charts.push({ id: gid, type: 'bar', labels: c.per.map(p => p.row.code), sets: INSECTS.map((n2, i) => ({ label: n2, data: c.per.map(p => p.c[i] || 0), color: INS_COLORS[i] })), w: 1000, h: o === 'P' ? 420 : 260, legend: true });
+      charts.push({ id: gid, type: 'bar', labels: c.per.map(p => p.row.code), tickColors: c.per.map(p => (cfg.rowColors || {})[p.row.id] || '#666'), sets: INSECTS.map((n2, i) => ({ label: n2, data: c.per.map(p => p.c[i] || 0), color: INS_COLORS[i] })), w: 1000, h: o === 'P' ? 420 : 260, legend: true });
       html += page(pageHead(`รายงานสรุปกราฟเครื่องดักแมลง ประจำเดือน ${monthLong(r.month)}`, 'ทำบริการ ณ ' + area.name, true) + `<div class="chartbox"><canvas id="${gid}"></canvas></div>`
-        + `<div class="sumblk" style="margin-top:8px"><div class="k">วิเคราะห์ปัญหา</div><div class="v">${nl(secText(sec, d, 'analysis') || iltAnalysis(cfg, sec, d))}</div>
+        + `<div class="sumblk" style="margin-top:8px"><div class="k">วิเคราะห์ปัญหา</div><div class="v">${colorize(cfg, sec, d, nl(secText(sec, d, 'analysis') || iltAnalysis(cfg, sec, d)))}</div>
            <div class="k">คำแนะนำการป้องกัน</div><div class="v">${nl(d.sec[sec.id]?.prevent ?? '1. แนะนำปิดประตูทุกครั้งเมื่อไม่ใช้งาน เพื่อช่วยลดปัญหาแมลงบินเข้าสู่พื้นที่\n2. การสุขาภิบาลทำความสะอาด เช่น การล้างพื้นในจุดทิ้งขยะหรือโรงอาหาร')}</div>
            <div class="k">การแก้ไขโดย AGA</div><div class="v">${nl(d.sec[sec.id]?.fix ?? 'รูปแบบการแก้ไขปัญหาแมลง ได้แก่\n1. ฉีดพ่นสารเคมีกำจัดตัวหนอนและตัวเต็มวัย\n2. การอบละอองเคมี\n3. การอบควันเคมีรอบนอก เช่น ท่อระบายน้ำ จุดทิ้งขยะ และตามพุ่มไม้\n4. แผ่นกาวเหนียวหรือริบบิ้นกาว')}</div></div>`, { sec: 'bar_' + sec.id, label: 'กราฟสรุปเครื่องดักแมลง ' + area.name, cls: o === 'P' ? 'P' : '' }); },
     photos: () => { const ph = d.photos || [];
@@ -842,7 +857,7 @@ function buildReport(el) {
       const id = 'chm_' + sec.id + '_' + rw.id.replace(/[^a-zA-Z0-9]/g, '_') + '_' + PAGE_NO;
       const data = months.map(m => { const x = sv(m)[rw.id]; return x && x.c ? sum(x.c) : null; });
       charts.push({ id, type: 'line', labels: months.map(m => TH_MS[ym(m).m - 1]), sets: [{ label: 'Total', data, color: '#1f4e9d' }], max: 250, w: o === 'P' ? 900 : 500, h: o === 'P' ? 230 : 190 });
-      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
+      return `<div class="chartbox"><table class="rt"><tr><th class="l" style="width:150px;color:${(cfg.rowColors || {})[rw.id] || 'inherit'}">เครื่องดักแมลงเครื่องที่ ${esc(rw.code)}</th>${months.map(m => `<th class="mo">${TH_MS[ym(m).m - 1]}</th>`).join('')}</tr><tr><td><b>Total</b></td>${data.map(v => `<td>${v ?? ''}</td>`).join('')}</tr></table><div class="ct" style="margin-top:3px">ผลเครื่องดักแมลง ${esc(rw.code)} ${esc(rw.loc)}</div><canvas id="${id}"></canvas></div>`; }).join('')}</div>`;
   }
   // page order copied from the customer's original PDF reports
   const L = n => Array.from({ length: n }, (_, i) => i);
@@ -879,8 +894,7 @@ function summaryBlock(secs, d, area) {
    <div class="sumblk"><div class="k n">จำนวนสถานี</div><div class="v">${x.stations} สถานี</div>
    <div class="k n">จำนวนการตรวจเช็ค</div><div class="v">${x.checks || 2} ครั้ง (ตรวจเช็ครอบบริการ และรอบติดตามผล)</div>
    <div class="k">สรุป</div><div class="v">การเข้าทำบริการ ประจำเดือน${monthLong(S.report.month)} (รอบบริการ และรอบติดตามผล)</div>
-   <div class="k n">แสดงว่า</div><div class="v">${nl(secText(x, d, 'summary') || autoSummary(S.cfg, x, d)).replace(/(ระดับความเสี่ยง\S+)/, '<b>$1</b>')}</div>
-   <div class="k">แยกตามสีจุดติดตั้ง</div><div class="v">สรุปประจำเดือน${monthLong(S.report.month)} จากการตรวจจำนวน ${secRows(S.cfg, x).length} ${x.type === 'ilt' ? 'เครื่อง' : 'สถานี'} พบทั้งหมด ${sum(colorBreak(S.cfg, x, d).map(y => +(y.txt.match(/พบทั้งหมด (\d+)/) || [0, 0])[1]))} ${esc(tx.unit)}${colorBreakHtml(S.cfg, x, d)}</div>
+   <div class="k n">แสดงว่า</div><div class="v">${colorize(S.cfg, x, d, nl(secText(x, d, 'summary') || autoSummary(S.cfg, x, d))).replace(/(ระดับความเสี่ยง\S+)/, '<b>$1</b>')}</div>
    <div class="k">หมายเหตุ</div><div class="v">${nl(secText(x, d, 'remark'))}</div></div>`; }).join('') + `
    <div class="recs"><b><u>การปรับปรุงแก้ไข/ข้อเสนอแนะ</u></b><div class="who">โดย บริษัท แอ๊ดวานซ์ กรุ๊ป เอเซีย จำกัด</div><div class="txt">${nl(secText(sec, d, 'recAGA'))}</div>
    <div class="who">โดย ${esc(S.cfg.name)}</div><div class="txt">${nl(secText(sec, d, 'recClient'))}</div></div>
@@ -906,7 +920,7 @@ function drawCharts(list) {
       type: c.type,
       data: { labels: c.labels, datasets: c.sets.map(s => ({ label: s.label, data: s.data, borderColor: s.color, backgroundColor: c.type === 'line' ? s.color : s.color, pointRadius: 3, borderWidth: c.type === 'line' ? 2 : 0, spanGaps: false, maxBarThickness: 26 })) },
       options: { responsive: false, devicePixelRatio: 2, animation: false, plugins: { legend: { display: !!c.legend, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { enabled: true }, vals: { small: c.small, pct: c.max === 100 } },
-        scales: { y: { beginAtZero: true, max: c.max || undefined, suggestedMax: c.max ? undefined : Math.max(5, Math.ceil(maxV * 1.25)), ticks: { font: { size: c.small ? 8 : 11 } } }, x: { offset: true, ticks: { font: { size: c.small ? 8 : 11 } } } } },
+        scales: { y: { beginAtZero: true, max: c.max || undefined, suggestedMax: c.max ? undefined : Math.max(5, Math.ceil(maxV * 1.25)), ticks: { font: { size: c.small ? 8 : 11 } } }, x: { offset: true, ticks: { font: { size: c.small ? 8 : 11 }, ...(c.tickColors ? { color: c.tickColors } : {}) } } } },
       plugins: [valuePlugin]
     });
     cv.style.width = '100%'; cv.style.maxWidth = c.w + 'px'; cv.style.height = 'auto'; cv.style.display = 'block'; cv.style.margin = '0 auto';
