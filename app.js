@@ -150,6 +150,24 @@ async function importRounds(cfg, siteId) {
   cfg.roundsImport = '2026-10';
   return true;
 }
+async function importResults(cfg, siteId) {
+  if (cfg.resultsImport || S.role !== 'advance') return false;
+  let src = {}; try { src = ((await (await fetch('results-2026-10.json')).json())[siteId]) || {}; } catch { return false; }
+  const norm = x => String(x).replace(/\s/g, '');
+  allSections(cfg).forEach(({ sec }) => (src[sec.id] || []).forEach(e => {
+    const rows = sec.rows;
+    let rw = rows.find(r => r.code === e.code && (e.exact ? norm(r.loc) === e.key : norm(r.loc).includes(e.key)));
+    if (!rw && e.add) { rw = { id: sec.id + '-' + e.code + '-res', code: e.code, loc: e.add, hideDev: true }; rows.push(rw); }
+    if (!rw) return;
+    if (e.tag) rw.tag = e.tag;
+    if (e.old) { rw.res = true; rw.set = 1; rw.until = '2026-10'; delete rw.since; }
+    if (e.old || e.add) { rows.splice(rows.indexOf(rw), 1);
+      const tgt = e.after || e.code, idx = rows.map((r, i) => [r, i]).filter(([r]) => r.code === tgt && !(r.set === 1 && !r.res)).map(x => x[1]);
+      const at = idx.length ? (e.before && !e.after ? idx[0] : idx[idx.length - 1] + 1) : rows.length; rows.splice(at, 0, rw); }
+  }));
+  cfg.resultsImport = '2026-10';
+  return true;
+}
 const roundDates = md => String((md && md.serviceDates) || '').split(/\s*,\s*/).filter(Boolean);
 const curMonth = () => (S.report && S.report.month) || '';
 // a station is listed from rw.since to rw.until (YYYY-MM); outside that window it has moved away
@@ -161,7 +179,7 @@ function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sec
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
 function secRows(cfg, sec, m = curMonth(), all = false) {
-  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x) && (all || effSet(r, x) !== 1);
+  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x) && (all ? !r.hideDev : (effSet(r, x) !== 1 || r.res));
   if (!m) return rows;
   if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => ok(r, x))) : rows; }
   return rows.filter(r => ok(r, m));
@@ -271,7 +289,7 @@ function renderTop() {
 }
 async function loadList() {
   S.cfg = siteObj().config;
-  if (S.cfg && S.cfg.areas && (normRounds(S.cfg) | await importRounds(S.cfg, S.siteId)) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
+  if (S.cfg && S.cfg.areas && (normRounds(S.cfg) | await importRounds(S.cfg, S.siteId) | await importResults(S.cfg, S.siteId)) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
   S.reports = await rpc('pr_list_reports', { k: KEY, p_site: S.siteId });
   if (S.role === 'advance' && !S.links.length) { try { S.links = await rpc('pr_links', { k: KEY }); } catch { } }
 }
@@ -413,7 +431,7 @@ function renderSecEditor() {
   let table;
   if (sec.type === 'ilt') {
     table = `<div style="overflow:auto"><table class="inp"><thead><tr><th>No.</th><th>พื้นที่ทำบริการ</th>${INSECTS.map(x => `<th style="min-width:60px">${x}</th>`).join('')}<th>รวม</th><th title="ทำความสะอาด">ทำความ<br>สะอาด</th><th title="ตรวจเช็คหลอดไฟ">เช็ค<br>หลอดไฟ</th><th title="เปลี่ยนแผ่นกาว">เปลี่ยน<br>แผ่นกาว</th></tr></thead><tbody>
-      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${locRich(r)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td>
+      ${rows.map(r => { const x = d.v[r.id] || {}; const c = x.c || []; return `<tr><td class="code">${esc(r.code)}</td><td class="loc small">${locRich(r)} <span class="red">${esc(r.tag || '')}</span></td>
         ${INSECTS.map((_, i) => `<td><input type="number" min="0" step="1" data-ilt="${r.id}" data-i="${i}" value="${c[i] ?? ''}" placeholder="-"></td>`).join('')}
         <td class="prev" data-rt="${r.id}"><b>${sum(c)}</b></td>
         ${['clean', 'bulb', 'glue'].map(f => `<td style="text-align:center"><input type="checkbox" data-chk="${r.id}" data-f="${f}" ${x[f] ? 'checked' : ''}></td>`).join('')}
@@ -423,7 +441,7 @@ function renderSecEditor() {
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง</button><button class="btn sm" id="chkAll">✓ ทำความสะอาด/เช็คหลอดไฟ ทุกเครื่อง</button><span class="small muted">ค่าฐานคำนวณ % = ${sec.base || '-'} (แก้ได้ที่ ⚙️ ตั้งค่า)</span></div>`;
   } else {
     table = `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้ง</th><th>เดือนก่อน<br><span class="small">${monthShort(prevKey)}</span></th><th>${monthShort(S.report.month)}<br><span class="small">(${t.unit})</span></th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${locRich(r)} <span class="red">${esc(roundTag(r, S.data.meta))}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
+      ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${locRich(r)} <span class="red">${esc(r.tag || '')}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table><div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
       <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
@@ -553,8 +571,9 @@ function renderSettings() {
          <div class="field"><label>จำนวนสถานี (ใช้คำนวณ %)</label><input type="number" data-st="${ai}.${si}.stations" value="${sec.stations}"></div>
          ${sec.type === 'ilt' ? `<div class="field"><label>ค่าฐานคำนวณ % (จำนวนแมลงที่ = 100%)</label><input type="number" data-st="${ai}.${si}.base" value="${sec.base || ''}"></div>` : `<div class="field"><label>จำนวนครั้งตรวจเช็ค/เดือน</label><input type="number" data-st="${ai}.${si}.checks" value="${sec.checks}"></div>`}</div>
          ${sec.same ? '' : `<div class="row" style="margin:6px 0">ดูรายชื่อ: ${[[0, 'ทั้งหมด'], [1, 'รอบที่ 1'], [2, 'รอบที่ 2']].map(([v, n]) => `<button class="btn sm ${(stView[sec.id] || 0) === v ? 'pri' : ''}" data-view-set="${sec.id}" data-v="${v}">${n} (${v ? sec.rows.filter(r => !r.set || r.set === v).length : sec.rows.length})</button>`).join('')}<span class="small muted">"ทั้ง 2 รอบ" = จุดที่ตำแหน่งเดิมทั้งสองรอบ</span></div>
-           <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>รอบ (เดือนที่ย้าย)</th><th>ใช้ตั้งแต่</th><th>ใช้ถึง</th><th>สี</th><th></th></tr></thead><tbody>
+           <table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้งอุปกรณ์</th><th>วงเล็บท้ายชื่อ (ตารางผล)</th><th>รอบ (เดือนที่ย้าย)</th><th>ใช้ตั้งแต่</th><th>ใช้ถึง</th><th>สี</th><th></th></tr></thead><tbody>
            ${sec.rows.map((r, ri) => (stView[sec.id] && r.set && r.set !== stView[sec.id]) ? '' : `<tr><td><input data-rw="${ai}.${si}.${ri}.code" value="${esc(r.code)}" style="width:64px"></td><td><div style="display:flex;gap:4px"><input data-rw="${ai}.${si}.${ri}.loc" value="${esc(r.loc)}" style="flex:1;color:${(cfg.rowColors || {})[r.id] || '#000'}"><button class="btn sm" data-rrich="${ai}.${si}.${ri}" title="แก้ชื่อและใส่หลายสีในแถวเดียว">🎨${r.rich ? '✓' : ''}</button></div></td>
+             <td><input data-rw="${ai}.${si}.${ri}.tag" value="${esc(r.tag || '')}" placeholder="เช่น (เก็บผล 9/10/2569)" style="width:170px;color:#ff0000">${r.set === 1 ? `<label class="small" style="display:block"><input type="checkbox" data-rres="${ai}.${si}.${ri}" ${r.res ? 'checked' : ''}> แสดงในตารางผล</label>` : ''}</td>
              <td><select data-rs="${ai}.${si}.${ri}">${[['', 'ทั้ง 2 รอบ'], ['1', 'รอบที่ 1'], ['2', 'รอบที่ 2']].map(([v, n]) => `<option value="${v}" ${String(r.set || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
              <td><input type="month" data-rm="${ai}.${si}.${ri}.since" value="${esc(r.since || '')}" style="width:120px"></td><td><input type="month" data-rm="${ai}.${si}.${ri}.until" value="${esc(r.until || '')}" style="width:120px"></td>
              <td><select data-rc="${esc(r.id)}" style="color:${(cfg.rowColors || {})[r.id] || '#000'};font-weight:600">${[['', 'ไม่กำหนด'], ...colorDefs(cfg).map(x => [x.c, x.name])].map(([c, n]) => `<option value="${c}" style="color:${c || '#000'}" ${((cfg.rowColors || {})[r.id] || '') === c ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></td>
@@ -575,6 +594,7 @@ function renderSettings() {
     $$('[data-an]').forEach(i => i.oninput = () => cfg.areas[+i.dataset.an].name = i.value);
     $$('[data-st]').forEach(i => i.oninput = () => { const [a, b, f] = i.dataset.st.split('.'); cfg.areas[a].sections[b][f] = i.type === 'number' ? Number(i.value) : i.value; });
     $$('[data-rw]').forEach(i => i.oninput = () => { const [a, b, r, f] = i.dataset.rw.split('.'), row = cfg.areas[a].sections[b].rows[r]; row[f] = i.value; if (f === 'loc') delete row.rich; });
+    $$('[data-rres]').forEach(i => i.onchange = () => { const [a, b, r] = i.dataset.rres.split('.'); const row = cfg.areas[a].sections[b].rows[r]; if (i.checked) row.res = true; else delete row.res; });
     $$('[data-rrich]').forEach(x => x.onclick = async () => {
       const [a, b, r] = x.dataset.rrich.split('.').map(Number), row = cfg.areas[a].sections[b].rows[r], base = (cfg.rowColors || {})[row.id] || '#000000';
       const sw = [...colorDefs(cfg).map(y => [y.c, y.name]), ['#ff0000', 'แดง']];
@@ -736,7 +756,7 @@ function buildReport(el) {
   // ---- page renderers (orientation P = portrait, default landscape) ----
   const S2 = id => findSec(cfg, id), A2 = sec => cfg.areas.find(a => a.sections.includes(sec));
   const lblOf = sec => `${sec.title} — ${A2(sec).name}`;
-  const locHtml = sec => rw => locRich(rw) + (rw.set ? ` <span class="red">${esc(roundTag(rw, md))}</span>` : '');
+  const locHtml = sec => rw => locRich(rw) + (rw.tag ? ` <span class="red">${esc(rw.tag)}</span>` : '');
   const rowSt = rw => (cfg.rowColors || {})[rw.id] ? `style="color:${cfg.rowColors[rw.id]}"` : '';   // purple/pink/green per original report
   const countData = sec => {
     const c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
@@ -766,7 +786,7 @@ function buildReport(el) {
       const note = set === 1 && dates[0] ? `หมายเหตุ : พื้นที่สำหรับเก็บผลวันที่ ${esc(dates[0])}` : set === 2 && dates[1] ? `* พื้นที่ปัจจุบัน เก็บผลตั้งแต่ ${esc(dates[1])} เป็นต้นไป` : '';
       html += page(pageHead('', secs[0].type === 'bait' && set ? null : area.name, true) + secs.map(sec => { const rows = rowsOf(sec), nums = rows.map(rw => parseInt(rw.code)).filter(n => !isNaN(n)), L = (rows[0]?.code || '').replace(/\d+/, '');
         return `<div style="font-weight:700;margin:8px 0 2px">${esc(sec.title.replace(/\s*\([A-Z]\)$/, ''))}</div><table class="rt dev"><thead><tr><th style="width:44px">ลำดับ</th><th style="width:80px">รหัสอุปกรณ์</th><th style="width:110px">ประเภทอุปกรณ์</th><th>ตำแหน่งติดตั้งอุปกรณ์</th></tr></thead><tbody>
-        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${set ? locRich(rw) : locHtml(sec)(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('')
+        ${rows.map((rw, i) => `<tr ${rowSt(rw)}><td>${i + 1}</td><td>${esc(rw.code)}</td><td>${esc(TYPES[sec.type].name)}</td><td class="l">${locRich(rw)}</td></tr>`).join('')}</tbody></table>`; }).join('')
         + colorLegend(cfg, used) + (note ? `<div class="rnote" style="color:#ff0000;font-weight:700;margin-top:6px">${note}</div>` : ''),
         { sec: 'dev_' + ids.join('_') + (set ? '_' + set : ''), label: 'รายการอุปกรณ์ ' + secs.map(x => x.title).join(', '), cls: 'P' });
     },
