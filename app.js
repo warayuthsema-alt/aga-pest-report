@@ -161,7 +161,7 @@ function allSections(cfg) { const out = []; (cfg.areas || []).forEach(a => a.sec
 function findSec(cfg, id) { return allSections(cfg).find(x => x.sec.id === id)?.sec; }
 function srcSec(cfg, sec) { return sec.same ? (findSec(cfg, sec.same) || sec) : sec; }
 function secRows(cfg, sec, m = curMonth(), all = false) {
-  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x);
+  const rows = srcSec(cfg, sec).rows || [], ok = (r, x) => rowActive(r, x) && (all || effSet(r, x) !== 1);
   if (!m) return rows;
   if (m === 'fy') { const ms = curMonth() ? fyMonths(curMonth()) : []; return ms.length ? rows.filter(r => ms.some(x => ok(r, x))) : rows; }
   return rows.filter(r => ok(r, m));
