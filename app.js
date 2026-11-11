@@ -92,6 +92,8 @@ function codeColors(cfg, sec, d) {
 function colorize(cfg, sec, d, html) {
   const m = codeColors(cfg, sec, d), col = k => m[k.replace(/\s/g, '')]?.c;
   return html.split('<br>').map(line => {
+    const cl = line.match(/^- จุดติดตั้งสี(\S+)/), cd = cl && colorDefs(cfg).find(x => x.name === cl[1]);
+    if (cd) return `<span style="color:${cd.c}">${line}</span>`;
     const one = line.match(/^(เครื่องที่ )(\d{1,3}\s?[A-Z])(?![A-Za-z])/);
     if (one && col(one[2])) return `<span style="color:${col(one[2])}">${line}</span>`;
     return line.replace(/(?<![0-9A-Za-z#])(\d{1,3}\s?[A-Z])(?![A-Za-z0-9])( \(\d+ [^)<]*\))?/g, (a, k) => col(k) ? `<span style="color:${col(k)}">${a}</span>` : a);
@@ -237,7 +239,7 @@ function autoSummary(cfg, sec, data) {
 }
 function iltAnalysis(cfg, sec, data) {
   const c = calc(cfg, sec, data), m = data && data.month || (S.report && S.report.month);
-  const head = [`สรุปประจำเดือน${m ? monthLong(m) : ''} จากการตรวจจำนวน ${secRows(cfg, sec).length} เครื่อง พบทั้งหมด ${c.total} ตัว`];
+  const head = [`สรุปประจำเดือน${m ? monthLong(m) : ''} จากการตรวจจำนวน ${secRows(cfg, sec).length} เครื่อง พบทั้งหมด ${c.total} ตัว`, 'แยกสรุปตามสีจุดติดตั้ง', ...colorBreak(cfg, sec, data).map(x => '- ' + x.txt)];
   if (!c.top.length) return [...head, 'ไม่พบแมลงติดเครื่องดักแมลงในเดือนนี้'].join('\n');
   return [...head, `จุดติดตั้งเครื่องที่ ${c.top.map(p => p.row.code).join(', ')} มีแมลงติดมากที่สุด ตามลำดับ`,
     ...c.top.map(p => `เครื่องที่ ${p.row.code} มีแมลงติดกับดักทั้งหมด ${p.total} ตัว`),
@@ -895,6 +897,7 @@ function summaryBlock(secs, d, area) {
    <div class="k n">จำนวนการตรวจเช็ค</div><div class="v">${x.checks || 2} ครั้ง (ตรวจเช็ครอบบริการ และรอบติดตามผล)</div>
    <div class="k">สรุป</div><div class="v">การเข้าทำบริการ ประจำเดือน${monthLong(S.report.month)} (รอบบริการ และรอบติดตามผล)</div>
    <div class="k n">แสดงว่า</div><div class="v">${colorize(S.cfg, x, d, nl(secText(x, d, 'summary') || autoSummary(S.cfg, x, d))).replace(/(ระดับความเสี่ยง\S+)/, '<b>$1</b>')}</div>
+   <div class="k">แยกตามสีจุดติดตั้ง</div><div class="v">สรุปประจำเดือน${monthLong(S.report.month)} จากการตรวจจำนวน ${secRows(S.cfg, x).length} ${x.type === 'ilt' ? 'เครื่อง' : 'สถานี'} พบทั้งหมด ${sum(colorBreak(S.cfg, x, d).map(y => +(y.txt.match(/พบทั้งหมด (\d+)/) || [0, 0])[1]))} ${esc(tx.unit)}${colorBreakHtml(S.cfg, x, d)}</div>
    <div class="k">หมายเหตุ</div><div class="v">${nl(secText(x, d, 'remark'))}</div></div>`; }).join('') + `
    <div class="recs"><b><u>การปรับปรุงแก้ไข/ข้อเสนอแนะ</u></b><div class="who">โดย บริษัท แอ๊ดวานซ์ กรุ๊ป เอเซีย จำกัด</div><div class="txt">${nl(secText(sec, d, 'recAGA'))}</div>
    <div class="who">โดย ${esc(S.cfg.name)}</div><div class="txt">${nl(secText(sec, d, 'recClient'))}</div></div>
