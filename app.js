@@ -457,14 +457,14 @@ function renderSecEditor() {
         ${['clean', 'bulb', 'glue'].map(f => `<td style="text-align:center"><input type="checkbox" data-chk="${r.id}" data-f="${f}" ${x[f] ? 'checked' : ''}></td>`).join('')}
 </tr>`; }).join('')}
       </tbody></table></div>
-      <div class="field" style="margin-top:8px"><label>หมายเหตุ</label><textarea data-tf="tableNote" spellcheck="true" lang="th" rows="3">${esc(iltTableNote(S.cfg, sec, S.data))}</textarea></div>
+      <div class="field" style="margin-top:8px"><label>หมายเหตุ <button class="btn sm" data-tnreset type="button">↺ ข้อความอัตโนมัติ</button></label><textarea data-tf="tableNote" spellcheck="true" lang="th" rows="3">${esc(iltTableNote(S.cfg, sec, S.data))}</textarea></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง</button><button class="btn sm" id="chkAll">✓ ทำความสะอาด/เช็คหลอดไฟ ทุกเครื่อง</button><span class="small muted">ค่าฐานคำนวณ % = ${sec.base || '-'} (แก้ได้ที่ ⚙️ ตั้งค่า)</span></div>`;
   } else {
     table = `<table class="inp"><thead><tr><th>รหัส</th><th>ตำแหน่งติดตั้ง</th><th>เดือนก่อน<br><span class="small">${monthShort(prevKey)}</span></th><th>${monthShort(S.report.month)}<br><span class="small">(${t.unit})</span></th></tr></thead><tbody>
       ${rows.map(r => `<tr><td class="code">${esc(r.code)}</td><td class="loc">${locRich(r)} <span class="red">${esc(r.tag || '')}</span></td><td class="prev">${prev[r.id] ?? '-'}</td>
         <td style="text-align:center"><input type="number" min="0" step="1" data-v="${r.id}" value="${d.v[r.id] ?? ''}" placeholder="-"></td></tr>`).join('')}
       </tbody></table>
-      <div class="field" style="margin-top:8px"><label>หมายเหตุท้ายตาราง (เว้นว่าง = ข้อความอัตโนมัติ)</label><textarea data-tf="tableNote" spellcheck="true" lang="th" rows="2">${esc(((d || {}).tableNote) || '')}</textarea></div>
+      <div class="field" style="margin-top:8px"><label>หมายเหตุ <button class="btn sm" data-tnreset type="button">↺ ข้อความอัตโนมัติ</button></label><textarea data-tf="tableNote" spellcheck="true" lang="th" rows="3">${esc(String((d || {}).tableNote || '').trim() ? d.tableNote : autoTableNote(S.cfg, sec, S.data))}</textarea></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" id="fillZero">ใส่ 0 ในช่องที่ว่าง (ไม่พบ)</button>
       <span class="small muted">สถานีที่ใช้คำนวณ ${sec.stations} จุด × ตรวจ ${sec.checks} ครั้ง = ฐาน ${sec.stations * sec.checks}${sec.type === 'bait' ? ' · % = ก้อนที่ถูกกัดแทะ × 100 ÷ (' + sec.stations + ' สถานี × ' + sec.checks + ')' : ''}</span></div>`;
   }
@@ -476,7 +476,7 @@ function renderSecEditor() {
       <div><span class="small muted">ระดับความเสี่ยง</span><b><span class="badge lv${c.lv}" style="font-size:16px">${LV_NAME[c.lv]}</span></b></div>
       ${sec.type === 'ilt' ? `<div><span class="small muted">มากที่สุด</span><b>${c.top.map(p => p.row.code + ' (' + p.total + ')').join(', ') || '-'}</b></div>` : `<div><span class="small muted">จุดที่พบ</span><b>${c.hits.map(h => h.row.code).join(', ') || '-'}</b></div>`}`;
     const ta = $('[data-tf="summary"]', m); if (ta) ta.placeholder = 'อัตโนมัติ:\n' + autoSummary(cfg, sec, S.data);
-    const tn = sec.type !== 'ilt' && $('[data-tf="tableNote"]', m); if (tn) tn.placeholder = 'อัตโนมัติ: ' + autoTableNote(cfg, sec, S.data);
+    const tn = $('[data-tf="tableNote"]', m); if (tn && !String(d.tableNote || '').trim()) tn.value = sec.type === 'ilt' ? iltTableNote(cfg, sec, S.data) : autoTableNote(cfg, sec, S.data);
     const an = $('[data-tf="analysis"]', m); if (an) an.placeholder = 'อัตโนมัติ:\n' + iltAnalysis(cfg, sec, S.data);
   };
   const validate = inp => {
@@ -515,6 +515,7 @@ function textFields(sec) {
 }
 function bindTextFields(m, sec) {
   $$('[data-tf]', m).forEach(i => i.oninput = () => { sd(sec.id)[i.dataset.tf] = i.value; markDirty(true); });
+  $$('[data-tnreset]', m).forEach(b => b.onclick = () => { delete sd(sec.id).tableNote; markDirty(true); const ta = $('[data-tf="tableNote"]', m); if (ta) ta.value = sec.type === 'ilt' ? iltTableNote(S.cfg, sec, S.data) : autoTableNote(S.cfg, sec, S.data); });
   $$('textarea', m).forEach(autoGrow);
 }
 function autoGrow(t) { const f = () => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 4) + 'px'; }; t.addEventListener('input', f); setTimeout(f, 0); }
