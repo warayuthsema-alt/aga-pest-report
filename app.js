@@ -872,7 +872,7 @@ function buildReport(el) {
   const L = n => Array.from({ length: n }, (_, i) => i);
   const ORDER = {
     pel: [['table', 'pG', 1], ['summary', ['pG']], ['table', 'pH', 1], ['summary', ['pH']], ['iltTable', 'pF', 'P', 0, 2], ['iltMach', 'pF', 2, 2, 'P'], ['iltYear', 'pF'], ['iltBar', 'pF', 'P'], ['summary', ['pF']],
-      ['table', 'pL', 1], ['summary', ['pL']], ['dev', ['pH', 'pG', 'pF', 'pL'], 2], ['layout', 0], ['layout', 1], ['dev', ['pH', 'pG', 'pF', 'pL'], 1], ['layout', 2], ['layout', 3], ['photos']],
+      ['table', 'pL', 1], ['summary', ['pL']], ['dev', ['pH', 'pG', 'pF', 'pL'], 1], ['layout', 2], ['layout', 3], ['dev', ['pH', 'pG', 'pF', 'pL'], 2], ['layout', 0], ['layout', 1], ['photos']],
     dental: [['area', 'food'], ['dev', ['fB', 'fA'], 1], ['layout', 0], ['dev', ['fB', 'fA'], 2], ['layout', 1], ['table', 'fA'], ['table', 'fB'], ['chart', 'fA'], ['chart', 'fB'], ['summary', ['fA', 'fB']],
       ['table', 'fG', 1], ['summary', ['fG']], ['table', 'fL'], ['chart', 'fL'], ['summary', ['fL']], ['table', 'fH'], ['chart', 'fH'], ['summary', ['fH']],
       ['iltTable', 'fF'], ['iltMach', 'fF', 0, 4], ['iltMach', 'fF', 4, 4], ['iltMach', 'fF', 8, 4], ['iltYear', 'fF'], ['iltBar', 'fF'], ['summary', ['fF']],
