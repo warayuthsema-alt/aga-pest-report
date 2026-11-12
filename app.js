@@ -814,6 +814,7 @@ function buildReport(el) {
         { sec: 'dev_' + ids.join('_') + (set ? '_' + set : ''), label: 'รายการอุปกรณ์ ' + secs.map(x => x.title).join(', '), cls: 'P' });
     },
     layout: i => { const l = (cfg.layouts || [])[i]; if (!l || (l.month && l.month !== r.month)) return; const an = (cfg.areas.find(a => a.id === l.area) || {}).name || '';
+      if (cfg.layoutBare) { html += page(`<img class="layout-img" src="${esc(l.src)}" loading="eager" style="max-height:186mm;border:0;display:block;margin:0 auto">`, { sec: 'layout_' + i, label: 'แผนผัง: ' + l.title }); return; }
       html += page(pageHead(l.title, an, true) + `<img class="layout-img" src="${esc(l.src)}" loading="eager">
       <div class="small" style="margin-top:4px">ผู้จัดทำ (Organizer): ${esc(md.preparedBy || cfg.preparedBy || '')} · ผู้อนุมัติ (Approver): ${esc(md.approver || cfg.approver || '')} · ลูกค้า (Customer): ${r.approved_by ? esc(r.approved_by) : '................................'}</div>`, { sec: 'layout_' + i, label: 'แผนผัง: ' + l.title }); },
     table: (id, withChart) => {
