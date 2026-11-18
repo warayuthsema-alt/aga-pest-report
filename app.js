@@ -886,6 +886,7 @@ function buildReport(el) {
   const order = ORDER[s.id] || [...allSections(cfg).flatMap(({ sec }) => sec.type === 'ilt' ? [['iltTable', sec.id], ['iltMach', sec.id, 0, 4], ['iltYear', sec.id], ['iltBar', sec.id], ['summary', [sec.id]]] : [['table', sec.id, 1], ['summary', [sec.id]]]),
     ...cfg.areas.map(a => ['dev', a.sections.filter(x => !x.same).map(x => x.id)]), ...L((cfg.layouts || []).length).map(i => ['layout', i]), ['photos']];
   order.forEach(([fn, ...args]) => { if (fn === 'dev' || fn === 'summary' ? args[0].every(S2) : (fn === 'area' || fn === 'layout' || fn === 'photos' || S2(args[0]))) P[fn](...args); });
+  if (cfg.wordMap) Object.entries(cfg.wordMap).forEach(([k, v]) => { const pre = v.slice(0, v.indexOf(k)); html = html.replace(new RegExp((pre ? '(?<!' + pre + ')' : '') + k, 'g'), v); });
   el.innerHTML = html;
   $$('.page', el).forEach(pg => pg.oncontextmenu = e => {
     if (S.role !== 'client') return;
