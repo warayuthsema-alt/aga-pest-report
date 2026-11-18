@@ -828,7 +828,7 @@ function buildReport(el) {
       const tn = ((d.sec || {})[sec.id] || {}).tableNote, note = `<div class="rnote"><b>หมายเหตุ :</b> ${colorize(cfg, sec, d, nl(tn && String(tn).trim() ? tn : autoTableNote(cfg, sec, d)))}</div>`;
       const PER = 20, chunks = []; for (let i = 0; i < k.tdata.length; i += PER) chunks.push(k.tdata.slice(i, i + PER));
       chunks.forEach((ch, i) => { const last = i === chunks.length - 1;
-        html += page((i ? '' : pageHead(t.report, area.name)) + head + ch.map(rowHtml).join('') + (last ? foot + note + (withChart && k.tdata.length <= 12 ? chartBox(sec, k) : '') : '</tbody></table>'), { sec: sec.id, label: lblOf(sec) }); });
+        html += page((i ? '' : pageHead(sec.report || t.report, area.name)) + head + ch.map(rowHtml).join('') + (last ? foot + note + (withChart && k.tdata.length <= 12 ? chartBox(sec, k) : '') : '</tbody></table>'), { sec: sec.id, label: lblOf(sec) }); });
     },
     chart: id => { const sec = S2(id), k = countData(sec);
       html += page(pageHead('กราฟสรุป' + TYPES[sec.type].name + ' — ' + sec.title, A2(sec).name) + chartBox(sec, k), { sec: sec.id, label: lblOf(sec) }); },
@@ -872,7 +872,7 @@ function buildReport(el) {
   // page order copied from the customer's original PDF reports
   const L = n => Array.from({ length: n }, (_, i) => i);
   const ORDER = {
-    pel: [['table', 'pG', 1], ['summary', ['pG']], ['table', 'pH', 1], ['summary', ['pH']], ['iltTable', 'pF', 'P', 0, 2], ['iltMach', 'pF', 2, 2, 'P'], ['iltYear', 'pF'], ['iltBar', 'pF', 'P'], ['summary', ['pF']],
+    pel: [['table', 'pG', 1], ['summary', ['pG']], ['table', 'pH', 1], ['summary', ['pH']], ['iltTable', 'pF', 'P', 0, 0], ['iltMach', 'pF', 0, 3, 'P'], ['iltYear', 'pF'], ['iltBar', 'pF', 'P'], ['summary', ['pF']],
       ['table', 'pL', 1], ['summary', ['pL']], ['dev', ['pH', 'pG', 'pF', 'pL'], 1], ['layout', 2], ['layout', 3], ['dev', ['pH', 'pG', 'pF', 'pL'], 2], ['layout', 0], ['layout', 1], ['photos']],
     dental: [['area', 'food'], ['dev', ['fB', 'fA'], 1], ['layout', 0], ['dev', ['fB', 'fA'], 2], ['layout', 1], ['table', 'fA'], ['table', 'fB'], ['chart', 'fA'], ['chart', 'fB'], ['summary', ['fA', 'fB']],
       ['table', 'fG', 1], ['summary', ['fG']], ['table', 'fL'], ['chart', 'fL'], ['summary', ['fL']], ['table', 'fH'], ['chart', 'fH'], ['summary', ['fH']],
@@ -900,7 +900,7 @@ function buildReport(el) {
 function summaryBlock(secs, d, area) {
   const sec = secs[0], t = TYPES[sec.type], lv = Math.max(...secs.map(x => calc(S.cfg, x, d).lv));
   return secs.map((x, i) => { const tx = TYPES[x.type];
-    return `<div class="sumh">${i + 1}.สรุปผลการตรวจเช็ค${esc(tx.name)} ${esc(x.title.replace(/\s*\([A-Z]\)$/, ''))} ${esc(area.name)}</div>
+    return `<div class="sumh">${i + 1}.สรุปผลการตรวจเช็ค${S.cfg.sumTitleOnly ? '' : esc(tx.name) + ' '}${esc(x.title.replace(/\s*\([A-Z]\)$/, ''))} ${esc(area.name)}</div>
    <div class="sumblk"><div class="k n">จำนวนสถานี</div><div class="v">${x.stations} สถานี</div>
    <div class="k n">จำนวนการตรวจเช็ค</div><div class="v">${x.checks || 2} ครั้ง (ตรวจเช็ครอบบริการ และรอบติดตามผล)</div>
    <div class="k">สรุป</div><div class="v">การเข้าทำบริการ ประจำเดือน${monthLong(S.report.month)} (รอบบริการ และรอบติดตามผล)</div>
