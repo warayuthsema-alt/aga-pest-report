@@ -703,7 +703,20 @@ async function openView(id, fromEdit, doPrint) {
   buildReport($('#report'));
   if (doPrint) setTimeout(printReport, 900);
 }
-function printReport() {
+async function waitImages(root) {
+  // wait until every layout/photo image is fully loaded + decoded, so the PDF never gets blank layout pages
+  const imgs = $$('img', root || document);
+  imgs.forEach(i => { i.loading = 'eager'; });
+  const one = i => new Promise(res => { const done = () => (i.decode ? i.decode().catch(() => {}) : Promise.resolve()).then(res);
+    if (i.complete && i.naturalWidth) return done(); i.addEventListener('load', done, { once: true }); i.addEventListener('error', res, { once: true }); });
+  await Promise.race([Promise.all(imgs.map(one)), new Promise(r => setTimeout(r, 20000))]);
+  return imgs.filter(i => !i.naturalWidth).length;
+}
+async function printReport() {
+  const bt = $('#vPdf'), bt0 = bt && bt.innerHTML; if (bt) { bt.disabled = true; bt.innerHTML = '⏳ กำลังโหลดรูปแผนผัง…'; }
+  const bad = await waitImages($('#report')); await new Promise(r => setTimeout(r, 300));
+  if (bt) { bt.disabled = false; bt.innerHTML = bt0; }
+  if (bad) toast(`มีรูป ${bad} รูปโหลดไม่สำเร็จ — ลองกด Ctrl+F5 แล้วส่งออกอีกครั้ง`);
   const old = document.title; const s = siteObj();
   document.title = `รายงานกำจัดสัตว์พาหะ_${s.id === 'pel' ? 'PEL' : 'มูลนิธิทันตนวัตกรรม'}_${monthLong(S.report.month).replace(' ', '_')}`;
   window.print(); setTimeout(() => document.title = old, 1000);
@@ -779,7 +792,7 @@ function buildReport(el) {
      <div class="ct">เลขที่สัญญา ${esc(md.contract || cfg.contract || '')}</div><div class="ln">ประจำเดือน ${monthLong(r.month)}</div><div class="ln">เสนอ</div>
      <div class="ln"><b>${esc(cfg.name)}</b></div>${isPel ? `<div class="ln">บริเวณ${esc(cfg.areas[0].name)}</div>` : ''}
      <div class="ln" style="margin-top:10px">จัดทำโดย</div><div class="ln"><b>${esc(md.preparedBy || cfg.preparedBy || '')}</b></div><div class="ln">${esc(md.preparedRole || cfg.preparedRole || '')}</div>
-     ${r.status === 'approved' ? `<div style="margin-top:8px"><span class="stamp">✓ ลูกค้าตรวจแล้ว ${thDate(r.approved_at)}${r.approved_by ? ' — ' + esc(r.approved_by) : ''}</span></div>` : ''}
+     ${r.status === 'approved' && !cfg.noStamp ? `<div style="margin-top:8px"><span class="stamp">✓ ลูกค้าตรวจแล้ว ${thDate(r.approved_at)}${r.approved_by ? ' — ' + esc(r.approved_by) : ''}</span></div>` : ''}
      <img class="wave" src="wave.png" alt=""></div>`, { sec: 'cover', label: 'หน้าปก', cls: 'portrait' });
   // ---- page renderers (orientation P = portrait, default landscape) ----
   const S2 = id => findSec(cfg, id), A2 = sec => cfg.areas.find(a => a.sections.includes(sec));
