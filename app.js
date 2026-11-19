@@ -504,7 +504,11 @@ function renderEditNavDots() { /* nav dots update on re-render */ }
 function textFields(sec) {
   const d = S.data.sec[sec.id] || {}, t = TYPES[sec.type];
   const ilt = sec.type === 'ilt';
-  return `<div class="card"><h3>ข้อความสรุปในรายงาน</h3>
+  const nf = (k, lbl) => `<div class="field"><label>${lbl}</label><textarea data-tf="${k}" spellcheck="true" lang="th" rows="2" placeholder="เว้นว่าง = ไม่แสดงหมายเหตุใต้กราฟ">${esc(d[k] || '')}</textarea></div>`;
+  const nMach = ilt ? Math.ceil(secRows(S.cfg, sec, 'fy').length / 4) : 0;
+  const cn = !S.cfg.chartNotes ? '' : `<div class="card"><h3>หมายเหตุใต้กราฟ <span class="small muted">(เว้นว่าง = ไม่แสดง)</span></h3>
+    ${ilt ? Array.from({ length: nMach }, (_, i) => nf('machNote_' + i * 4, `กราฟรายเครื่อง หน้าที่ ${i + 1} (เครื่อง ${i * 4 + 1}–${i * 4 + 4})`)).join('') + nf('barNote', 'กราฟแท่งสรุปเครื่องดักแมลงประจำเดือน') : nf('chartNote', 'กราฟ ' + esc(t.chart || ''))}</div>`;
+  return cn + `<div class="card"><h3>ข้อความสรุปในรายงาน</h3>
     <div class="field"><label>สรุป "แสดงว่า" (เว้นว่าง = ใช้ข้อความอัตโนมัติตามตัวเลข)</label><textarea data-tf="summary" spellcheck="true" lang="th" rows="4">${esc(d.summary || '')}</textarea></div>
     ${ilt ? `<div class="field"><label>วิเคราะห์ปัญหา (เว้นว่าง = อัตโนมัติ)</label><textarea data-tf="analysis" spellcheck="true" lang="th" rows="4">${esc(d.analysis || '')}</textarea></div>
       <div class="field"><label>คำแนะนำการป้องกัน</label><textarea data-tf="prevent" spellcheck="true" lang="th">${esc(d.prevent ?? '1. แนะนำปิดประตูทุกครั้งเมื่อไม่ใช้งาน เพื่อช่วยลดปัญหาแมลงบินเข้าสู่พื้นที่\n2. การสุขาภิบาลทำความสะอาด เช่น การล้างพื้นในจุดทิ้งขยะหรือโรงอาหาร')}</textarea></div>
@@ -793,10 +797,11 @@ function buildReport(el) {
     const overall = grand / (c.denom * nHas) * 100;
     return { c, rows, tdata, mt, mh, mp, nHas, grand, overall, bait };
   };
+  const cNote = (sec, key) => { const v = cfg.chartNotes && ((d.sec || {})[sec.id] || {})[key]; return v && String(v).trim() ? `<div class="rnote"><b>หมายเหตุ :</b> ${colorize(cfg, sec, d, nl(v))}</div>` : ''; };
   const chartBox = (sec, k) => {
     const t = TYPES[sec.type], cid = 'ch_' + sec.id + '_' + PAGE_NO;
     charts.push({ id: cid, type: 'line', labels: months.map(monthShort), sets: [{ label: 'Total', data: k.mp, color: '#1f4e9d' }], max: 100, w: 1000, h: 230 });
-    return `<div class="chartbox"><div class="ct">${esc(t.chart)}</div><canvas id="${cid}"></canvas><table class="rt" style="margin-top:4px"><tr><th class="mo"></th>${months.map(m => `<th class="mo">${monthShort(m)}</th>`).join('')}</tr><tr><td><b>Total</b></td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}</tr></table></div>`;
+    return `<div class="chartbox"><div class="ct">${esc(t.chart)}</div><canvas id="${cid}"></canvas><table class="rt" style="margin-top:4px"><tr><th class="mo"></th>${months.map(m => `<th class="mo">${monthShort(m)}</th>`).join('')}</tr><tr><td><b>Total</b></td>${k.mp.map(v => `<td>${v === null ? '' : fmt2(v)}</td>`).join('')}</tr></table>${cNote(sec, 'chartNote')}</div>`;
   };
   const P = {
     area: a => html += page(`<div style="text-align:center;padding-top:80mm"><div style="font-size:30px;font-weight:700">รายงานปฏิบัติงานกำจัดสัตว์พาหะ</div><div style="font-size:30px;font-weight:700;margin:6mm 0">${esc(cfg.name)}</div><div style="font-size:30px;font-weight:700">${esc(cfg.areas.find(x => x.id === a).name)}</div></div>`, { sec: 'area_' + a, label: 'หน้าพื้นที่', cls: 'P' }),
@@ -842,7 +847,7 @@ function buildReport(el) {
         <tr class="pct"><td colspan="11">คิดเป็นร้อยละ (ของการติดทั้งหมด)</td><td>${fmt2(c.pct)}</td><td colspan="3"></td></tr></tbody></table>`;
       html += page(pageHead(TYPES.ilt.name + 'บริเวณ' + area.name, null) + tbl + `<div class="rnote"><b>หมายเหตุ :</b> ${nl(iltTableNote(cfg, sec, d))}</div>` + (n ? machHtml(sec, from, n, o) : ''), { sec: sec.id, label: lblOf(sec), cls: o === 'P' ? 'P' : '' }); },
     iltMach: (id, from, n, o) => { const sec = S2(id);
-      html += page(pageHead(`กราฟสรุปผลเครื่องดักแมลง ${fyLabel(r.month)}`, A2(sec).name) + machHtml(sec, from, n, o), { sec: sec.id, label: lblOf(sec), cls: o === 'P' ? 'P' : '' }); },
+      html += page(pageHead(`กราฟสรุปผลเครื่องดักแมลง ${fyLabel(r.month)}`, A2(sec).name) + machHtml(sec, from, n, o) + cNote(sec, 'machNote_' + from), { sec: sec.id, label: lblOf(sec), cls: o === 'P' ? 'P' : '' }); },
     iltYear: id => { const sec = S2(id), c = calc(cfg, sec, d), rows = secRows(cfg, sec, 'fy'), sv = m => secVals(cfg, sec, year[m] || {});
       const yrows = months.map(m => { const vv = sv(m); const has = year[m] && Object.keys(vv).length; const cat = INSECTS.map((_, i) => sum(rows.map(rw => (vv[rw.id] && vv[rw.id].c && vv[rw.id].c[i]) || 0))); return { m, has, cat, tot: sum(cat) }; });
       const ycat = INSECTS.map((_, i) => sum(yrows.map(y => y.cat[i]))), ytot = sum(ycat);
@@ -851,7 +856,7 @@ function buildReport(el) {
         <tr class="tot"><td>รวม</td>${ycat.map(n2 => `<td>${n2}</td>`).join('')}<td>${ytot}</td><td>${fmt2(ytot / (c.base * 12) * 100)}</td></tr></tbody></table>`, { sec: sec.id, label: lblOf(sec) }); },
     iltBar: (id, o) => { const sec = S2(id), c = calc(cfg, sec, d), area = A2(sec), gid = 'chg_' + sec.id + '_' + PAGE_NO;
       charts.push({ id: gid, type: 'bar', labels: c.per.map(p => p.row.code), tickColors: c.per.map(() => '#000'), tickBold: true, sets: INSECTS.map((n2, i) => ({ label: n2, data: c.per.map(p => p.c[i] || 0), color: INS_COLORS[i] })), w: 1000, h: o === 'P' ? 420 : 260, legend: true });
-      html += page(pageHead(`รายงานสรุปกราฟเครื่องดักแมลง ประจำเดือน ${monthLong(r.month)}`, 'ทำบริการ ณ ' + area.name, true) + `<div class="chartbox"><canvas id="${gid}"></canvas></div>`
+      html += page(pageHead(`รายงานสรุปกราฟเครื่องดักแมลง ประจำเดือน ${monthLong(r.month)}`, 'ทำบริการ ณ ' + area.name, true) + `<div class="chartbox"><canvas id="${gid}"></canvas>${cNote(sec, 'barNote')}</div>`
         + `<div class="sumblk" style="margin-top:8px"><div class="k">วิเคราะห์ปัญหา</div><div class="v">${colorize(cfg, sec, d, nl(secText(sec, d, 'analysis') || iltAnalysis(cfg, sec, d)))}</div>
            <div class="k">คำแนะนำการป้องกัน</div><div class="v">${nl(d.sec[sec.id]?.prevent ?? '1. แนะนำปิดประตูทุกครั้งเมื่อไม่ใช้งาน เพื่อช่วยลดปัญหาแมลงบินเข้าสู่พื้นที่\n2. การสุขาภิบาลทำความสะอาด เช่น การล้างพื้นในจุดทิ้งขยะหรือโรงอาหาร')}</div>
            <div class="k">การแก้ไขโดย AGA</div><div class="v">${nl(d.sec[sec.id]?.fix ?? 'รูปแบบการแก้ไขปัญหาแมลง ได้แก่\n1. ฉีดพ่นสารเคมีกำจัดตัวหนอนและตัวเต็มวัย\n2. การอบละอองเคมี\n3. การอบควันเคมีรอบนอก เช่น ท่อระบายน้ำ จุดทิ้งขยะ และตามพุ่มไม้\n4. แผ่นกาวเหนียวหรือริบบิ้นกาว')}</div></div>`, { sec: 'bar_' + sec.id, label: 'กราฟสรุปเครื่องดักแมลง ' + area.name, cls: o === 'P' ? 'P' : '' }); },
@@ -879,7 +884,7 @@ function buildReport(el) {
       ['iltTable', 'fF'], ['iltMach', 'fF', 0, 4], ['iltMach', 'fF', 4, 4], ['iltMach', 'fF', 8, 4], ['iltYear', 'fF'], ['iltBar', 'fF'], ['summary', ['fF']],
       ...[2, 3, 4, 5, 6].map(i => ['layout', i]), ['dev', ['fH'], 1], ['dev', ['fF', 'fG', 'fL'], 1], ...[7, 8, 9, 10, 11].map(i => ['layout', i]), ['dev', ['fH'], 2], ['dev', ['fF', 'fG', 'fL'], 2],
       ['area', 'med'], ['dev', ['fB', 'fA'], 1], ['layout', 12], ['dev', ['fB', 'fA'], 2], ['layout', 13], ['table', 'mA'], ['table', 'mB'], ['chart', 'mA'], ['chart', 'mB'], ['summary', ['mA', 'mB']],
-      ['table', 'mG', 1], ['summary', ['mG']], ['table', 'mH'], ['summary', ['mH']], ['iltTable', 'mF'], ['iltMach', 'mF', 0, 4], ['iltMach', 'mF', 4, 4], ['iltMach', 'mF', 8, 4], ['iltYear', 'mF'], ['iltBar', 'mF'], ['summary', ['mF']],
+      ['table', 'mG', 1], ['summary', ['mG']], ['table', 'mH'], ['chart', 'mH'], ['summary', ['mH']], ['iltTable', 'mF'], ['iltMach', 'mF', 0, 4], ['iltMach', 'mF', 4, 4], ['iltMach', 'mF', 8, 4], ['iltYear', 'mF'], ['iltBar', 'mF'], ['summary', ['mF']],
       ['table', 'mL', 1], ['summary', ['mL']], ['dev', ['mG', 'mF'], 1], ['dev', ['mH'], 1], ['dev', ['mL'], 1], ...[14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map(i => ['layout', i]), ['dev', ['mH'], 2], ['dev', ['mF', 'mG'], 2], ['dev', ['mL'], 2], ['photos']]
   };
   // shortcut: sites other than pel/dental get a generic order (areas → tables → summaries → devices → layouts)
