@@ -268,6 +268,10 @@ function secText(sec, d, field) {
 const S = { boot: null, role: null, sites: [], siteId: null, cfg: null, reports: [], links: [], report: null, data: null, year: {}, view: 'list', secId: null, dirty: false };
 const app = () => $('#app');
 const siteObj = () => S.sites.find(s => s.id === S.siteId);
+// per-month settings: config.byMonth['YYYY-MM'] = full config used from that month onward; months before the first entry use the base config
+const cfgMonths = () => Object.keys((siteObj().config || {}).byMonth || {}).sort();
+function cfgKeyFor(m) { const ks = cfgMonths().filter(k => !m || k <= m); return ks.length ? ks[ks.length - 1] : null; }
+function cfgFor(m) { const b = siteObj().config || {}, k = cfgKeyFor(m); return k ? b.byMonth[k] : b; }
 
 async function init() {
   if (!KEY) { app().innerHTML = `<div class="wrap"><div class="card"><h2>ไม่พบรหัสเข้าใช้งาน</h2><p>กรุณาเปิดจากลิงก์ที่ได้รับจาก Advance Group Asia (ลิงก์จะมี ?k=... ต่อท้าย)</p></div></div>`; return; }
@@ -310,6 +314,7 @@ function renderTop() {
 async function loadList() {
   S.cfg = siteObj().config;
   if (S.cfg && S.cfg.areas && (normRounds(S.cfg) | await importRounds(S.cfg, S.siteId) | await importResults(S.cfg, S.siteId)) && S.role === 'advance') { try { await rpc('pr_save_site', { k: KEY, p_site: S.siteId, p_config: S.cfg }); } catch { } }
+  S.cfg = cfgFor(null);
   S.reports = await rpc('pr_list_reports', { k: KEY, p_site: S.siteId });
   if (S.role === 'advance' && !S.links.length) { try { S.links = await rpc('pr_links', { k: KEY }); } catch { } }
 }
@@ -370,6 +375,7 @@ function promptModal(title, html, getter, okText = 'ตกลง') {
 /* ---------------- load report ---------------- */
 async function loadReport(id) {
   S.report = await rpc('pr_get_report', { k: KEY, p_id: id });
+  S.cfg = cfgFor(S.report.month);
   S.data = S.report.data || {}; S.data.sec = S.data.sec || {}; S.data.meta = S.data.meta || {}; S.data.photos = S.data.photos || [];
   const ms = fyMonths(S.report.month);
   S.year = await rpc('pr_year', { k: KEY, p_site: S.siteId, p_from: ms[0], p_to: ms[11] });
@@ -403,12 +409,13 @@ function renderEdit() {
    <div class="actionbar"><button class="btn" id="eBack">← รายการ</button>
      <b style="font-size:17px">${esc(siteObj().id === 'pel' ? 'PEL' : 'มูลนิธิทันตนวัตกรรมฯ')} · ${monthLong(r.month)}</b> ${stBadge(r.status)}
      <span class="sp" style="flex:1"></span><span class="small muted" id="dirtyMark"></span>
-     <button class="btn" id="eSave">💾 บันทึกร่าง</button><button class="btn" id="ePreview">👁 ดูตัวอย่างรายงาน</button>
+     <button class="btn" id="eCfg" title="ตั้งค่าจุดติดตั้ง/แผนผัง ที่ใช้กับรายงานเดือนนี้และเดือนถัดไป">⚙️ ตั้งค่าเดือนนี้</button><button class="btn" id="eSave">💾 บันทึกร่าง</button><button class="btn" id="ePreview">👁 ดูตัวอย่างรายงาน</button>
      <button class="btn" id="ePdf">📄 ส่งออก PDF</button><button class="btn pri" id="eSend">📤 ส่งถึงลูกค้า</button></div>
    <div class="ed"><div class="nav"><a data-nav="meta" class="${S.secId === 'meta' ? 'on' : ''}">📋 ข้อมูลทั่วไป</a>${navSecs}
      <div class="ar">อื่นๆ</div><a data-nav="photos" class="${S.secId === 'photos' ? 'on' : ''}">📷 รายงานสำรวจปัญหา (รูปภาพ) <span class="badge st-draft">${S.data.photos.length}</span></a></div>
    <div id="edMain"></div>
    <div class="side"><div class="card"><h3>💬 โน้ตจากลูกค้า ${openN ? `<span class="badge st-revise">ค้าง ${openN}</span>` : ''}</h3><div id="noteList"></div></div></div></div></div>`;
+  $('#eCfg').onclick = () => { if (S.dirty) { toast('กรุณากด 💾 บันทึกร่าง ก่อนเข้าตั้งค่า', true); return; } renderSettings(r.month, r.id); };
   $('#eBack').onclick = async () => { if (S.dirty && !confirm('ยังไม่ได้บันทึก ต้องการออกหรือไม่?')) return; await loadList(); renderList(); };
   $('#eSave').onclick = () => save(false);
   $('#eSend').onclick = send;
@@ -587,10 +594,29 @@ async function send() {
 }
 
 /* ---------------- settings (advance) ---------------- */
-function renderSettings() {
-  S.view = 'settings'; const cfg = clone(S.cfg); const s = siteObj(); const stView = {}, stOpen = new Set();
+function defSettingsMonth() {
+  const open = S.reports.filter(r => r.status !== 'approved').map(r => r.month).sort();
+  if (open.length) return open[open.length - 1];
+  return S.reports[0]?.month ? addMonth(S.reports[0].month, 1) : keyOf(new Date().getFullYear(), new Date().getMonth() + 1);
+}
+function renderSettings(month, backTo) {
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) month = defSettingsMonth();
+  S.view = 'settings'; const s = siteObj(); const cfg = clone(cfgFor(month)); delete cfg.byMonth; const stView = {}, stOpen = new Set();
+  const srcKey = cfgKeyFor(month), own = srcKey === month;
+  const later = cfgMonths().filter(k => k > month);
+  const affected = S.reports.map(r => r.month).filter(m => m >= month && !later.some(k => k <= m)).sort();
+  const before = S.reports.map(r => r.month).filter(m => m < month).sort();
+  const goBack = async () => { if (backTo) { await loadList(); openEdit(backTo); } else { await loadList(); renderList(); } };
   const draw = () => {
-    app().innerHTML = `<div class="wrap"><div class="actionbar"><button class="btn" id="stBack">← กลับ</button><b>ตั้งค่า: ${esc(s.id === 'pel' ? 'PEL' : s.name)}</b><span style="flex:1"></span><button class="btn pri" id="stSave">💾 บันทึกการตั้งค่า</button></div>
+    app().innerHTML = `<div class="wrap"><div class="actionbar"><button class="btn" id="stBack">← กลับ</button><b>ตั้งค่า: ${esc(s.id === 'pel' ? 'PEL' : s.name)}</b>
+       <label class="row" style="gap:6px;margin-left:12px"><span>ใช้ตั้งแต่รายงานเดือน</span><input type="month" id="stMonth" value="${month}"></label><span style="flex:1"></span>
+       ${own ? `<button class="btn danger" id="stDelVer" title="ลบชุดตั้งค่าของเดือนนี้ แล้วกลับไปใช้ชุดของเดือนก่อนหน้า">ลบชุดตั้งค่าเดือนนี้</button>` : ''}<button class="btn pri" id="stSave">💾 บันทึกการตั้งค่า</button></div>
+     <div class="card small" style="border-left:4px solid var(--g)">
+       <div>📅 การตั้งค่าชุดนี้จะใช้กับรายงานเดือน <b>${monthLong(month)}</b> เป็นต้นไป${affected.length ? ` — รายงานที่มีอยู่และจะใช้ค่านี้: <b>${affected.map(monthLong).join(', ')}</b>` : ''}</div>
+       <div class="muted">${own ? 'กำลังแก้ชุดตั้งค่าของเดือนนี้' : `ยังไม่มีชุดตั้งค่าของเดือนนี้ — ดึงค่าเริ่มต้นมาจาก${srcKey ? 'ชุดตั้งค่าเดือน ' + monthLong(srcKey) : 'การตั้งค่าเดิม'} เมื่อกดบันทึกจะสร้างชุดใหม่ของเดือนนี้`}
+       ${before.length ? ` · รายงานเดือนก่อนหน้า (${before.map(monthLong).join(', ')}) <b>ไม่ถูกเปลี่ยน</b>` : ''}</div>
+       ${later.length ? `<div style="color:var(--org)">⚠️ มีชุดตั้งค่าของเดือนถัดไปอยู่แล้ว (${later.map(monthLong).join(', ')}) — เมื่อบันทึก ชุดเหล่านั้นจะถูกแทนด้วยค่านี้ เพื่อส่งค่าไปยังเดือนถัดไป</div>` : ''}
+       ${cfgMonths().length ? `<div class="muted">ชุดตั้งค่าที่มี: ${cfgMonths().map(k => k === month ? '<b>' + monthLong(k) + '</b>' : monthLong(k)).join(' · ')}</div>` : ''}</div>
      <div class="card"><h3>ข้อมูลสัญญา</h3><div class="grid3">
        ${[['contract', 'เลขที่สัญญา'], ['name', 'ชื่อลูกค้า'], ['preparedBy', 'ผู้จัดทำ (ค่าเริ่มต้น)'], ['preparedRole', 'ตำแหน่งผู้จัดทำ'], ['approver', 'ผู้อนุมัติ']].map(([k, l]) => `<div class="field"><label>${l}</label><input data-c="${k}" value="${esc(cfg[k] || '')}"></div>`).join('')}</div></div>
      ${cfg.areas.map((a, ai) => `<div class="card"><div class="field"><label>ชื่อพื้นที่</label><input data-an="${ai}" value="${esc(a.name)}"></div>
@@ -616,8 +642,17 @@ function renderSettings() {
        <div class="field"><label>พื้นที่</label><select data-ly="${i}.area">${cfg.areas.map(a => `<option value="${a.id}" ${a.id === l.area ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
        <div class="row"><label class="btn sm">เปลี่ยนรูป<input type="file" accept="image/*" hidden data-lyimg="${i}"></label><span style="flex:1"></span><button class="btn sm danger" data-lydel="${i}">ลบ</button></div></div>`).join('')}</div>
        <label class="btn" style="margin-top:10px">＋ เพิ่มแผนผัง<input type="file" accept="image/*" hidden id="lyAdd"></label></div></div>`;
-    $('#stBack').onclick = renderList;
-    $('#stSave').onclick = async () => { try { await rpc('pr_save_site', { k: KEY, p_site: s.id, p_config: cfg }); s.config = cfg; S.cfg = cfg; s.name = cfg.name; toast('บันทึกการตั้งค่าแล้ว ✓'); renderList(); } catch (e) { toast(e.message, true); } };
+    $('#stBack').onclick = goBack;
+    $('#stMonth').onchange = e => { const v = e.target.value; if (!v) return; if (!confirm('เปลี่ยนเดือน? ค่าที่แก้ไว้แต่ยังไม่บันทึกจะหายไป')) { e.target.value = month; return; } renderSettings(v, backTo); };
+    $('#stSave').onclick = async () => {
+      if (later.length && !confirm(`ชุดตั้งค่าเดือน ${later.map(monthLong).join(', ')} จะถูกแทนด้วยค่านี้ ยืนยันหรือไม่?`)) return;
+      const nb = clone(s.config); nb.byMonth = nb.byMonth || {}; later.forEach(k => delete nb.byMonth[k]);
+      nb.byMonth[month] = clone(cfg);
+      try { await rpc('pr_save_site', { k: KEY, p_site: s.id, p_config: nb }); s.config = nb; toast(`บันทึกการตั้งค่า (ใช้ตั้งแต่ ${monthLong(month)}) แล้ว ✓`); goBack(); } catch (e) { toast(e.message, true); } };
+    const dv = $('#stDelVer'); if (dv) dv.onclick = async () => {
+      if (!confirm(`ลบชุดตั้งค่าเดือน ${monthLong(month)}? รายงานเดือนนี้จะกลับไปใช้ค่าของเดือนก่อนหน้า`)) return;
+      const nb = clone(s.config); delete nb.byMonth[month]; if (!Object.keys(nb.byMonth).length) delete nb.byMonth;
+      try { await rpc('pr_save_site', { k: KEY, p_site: s.id, p_config: nb }); s.config = nb; toast('ลบชุดตั้งค่าแล้ว'); renderSettings(month, backTo); } catch (e) { toast(e.message, true); } };
     $$('[data-c]').forEach(i => i.oninput = () => cfg[i.dataset.c] = i.value);
     $$('[data-an]').forEach(i => i.oninput = () => cfg.areas[+i.dataset.an].name = i.value);
     $$('[data-st]').forEach(i => i.oninput = () => { const [a, b, f] = i.dataset.st.split('.'); cfg.areas[a].sections[b][f] = i.type === 'number' ? Number(i.value) : i.value; });
@@ -640,7 +675,7 @@ function renderSettings() {
       if (res.some(y => y.c)) row.rich = res; else delete row.rich; draw(); toast('แก้ชื่อแล้ว — กด 💾 บันทึกการตั้งค่า');
     });
     $$('[data-rc]').forEach(i => i.onchange = () => { cfg.rowColors = cfg.rowColors || {}; if (i.value) cfg.rowColors[i.dataset.rc] = i.value; else delete cfg.rowColors[i.dataset.rc]; draw(); });
-    $$('[data-rdel]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rdel.split('.'); if (confirm('ลบจุดนี้? (ข้อมูลย้อนหลังของจุดนี้จะไม่แสดง)')) { cfg.areas[a].sections[b].rows.splice(r, 1); draw(); } });
+    $$('[data-rdel]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rdel.split('.'); if (confirm(`ลบจุดนี้ออกจากชุดตั้งค่าตั้งแต่ ${monthLong(month)}? (รายงานเดือนก่อนหน้าไม่เปลี่ยน)`)) { cfg.areas[a].sections[b].rows.splice(r, 1); draw(); } });
     $$('[data-rup]').forEach(x => x.onclick = () => { const [a, b, r] = x.dataset.rup.split('.').map(Number); const rows = cfg.areas[a].sections[b].rows; if (r > 0) { [rows[r - 1], rows[r]] = [rows[r], rows[r - 1]]; draw(); } });
     $$('[data-radd]').forEach(x => x.onclick = () => { const [a, b] = x.dataset.radd.split('.'); const sec = cfg.areas[a].sections[b]; sec.rows.push({ id: sec.id + '-n' + Date.now().toString(36), code: '', loc: '', ...(stView[sec.id] ? { set: stView[sec.id] } : {}) }); draw(); });
     $$('details[data-sid]').forEach(d => d.ontoggle = () => d.open ? stOpen.add(d.dataset.sid) : stOpen.delete(d.dataset.sid));
@@ -653,7 +688,7 @@ function renderSettings() {
     $$('[data-rm]').forEach(i => i.onchange = () => { const [a, b, r, f] = i.dataset.rm.split('.'); const row = cfg.areas[a].sections[b].rows[r]; if (i.value) row[f] = i.value; else delete row[f]; });
     $$('[data-rmove]').forEach(x => x.onclick = async () => {
       const [a, b, r] = x.dataset.rmove.split('.').map(Number), sec = cfg.areas[a].sections[b], row = sec.rows[r];
-      const defM = S.reports[0]?.month ? addMonth(S.reports[0].month, 1) : keyOf(new Date().getFullYear(), new Date().getMonth() + 1);
+      const defM = month;
       const res = await promptModal(`ย้ายจุด ${esc(row.code)}`, `<div class="small muted">ตำแหน่งเดิม: ${esc(row.loc)}</div>
         <div class="field" style="margin-top:8px"><label>ตำแหน่งใหม่</label><input id="mvLoc"></div>
         <div class="grid2"><div class="field"><label>รหัสใหม่ (ถ้าเปลี่ยน)</label><input id="mvCode" value="${esc(row.code)}"></div><div class="field"><label>เดือนที่ย้าย</label><input type="month" id="mvMonth" value="${defM}"></div></div>
